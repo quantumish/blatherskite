@@ -62,6 +62,16 @@ enum UserResponse {
 	BadRequest,
 }
 
+#[derive(ApiResponse)]
+enum DeleteResponse {
+	/// The delete operation succeeded
+	#[oai(status = 200)]
+	Success,
+	/// Invalid ID
+	#[oai(status = 404)]
+	NotFound,	
+}
+
 #[OpenApi]
 impl Api {
     #[oai(path = "/user", method = "get")]
@@ -86,11 +96,23 @@ impl Api {
         todo!()
     }
 
+	#[oai(path = "/user", method = "delete")]
+	/// Deletes a user
+    async fn delete_user(&self, id: Query<i64>) -> DeleteResponse {
+        todo!()
+    }
+	
 	#[oai(path = "/user/groups", method = "get")]
 	/// Gets all groups accessible to a user
     async fn get_groups(&self, id: Query<i64>) -> Json<Vec<Group>> {
         todo!()
     }
+
+	#[oai(path = "/user/groups", method = "delete")]
+	/// Leaves a group accessible to the user
+    async fn leave_group(&self, uid: Query<i64>, gid: Query<i64>) -> Json<Vec<Group>> {
+        todo!()		
+	}
 	
 	#[oai(path = "/group", method = "get")]
 	/// Gets the group with the given ID
@@ -110,6 +132,12 @@ impl Api {
         todo!()
     }
 
+	#[oai(path = "/group", method = "delete")]
+	/// Deletes a user
+    async fn delete_group(&self, id: Query<i64>) -> DeleteResponse {
+        todo!()
+    }
+	
 	#[oai(path = "/group/members", method = "get")]
 	/// Gets the members of the specified group
     async fn get_group_members(&self, id: Query<i64>) -> Json<Vec<User>> {
@@ -122,6 +150,12 @@ impl Api {
         todo!()
     }
 
+	#[oai(path = "/group/members", method = "delete")]
+	/// Adds a member to an existing group
+    async fn remove_group_member(&self, gid: Query<i64>, uid: Query<i64>) -> Json<Vec<User>> {
+        todo!()
+    }
+	
 	#[oai(path = "/group/channels", method = "get")]
 	/// Gets all channels in a group that are accessible to a user
     async fn get_channels(&self, gid: Query<i64>, uid: Query<i64>) -> Json<Vec<Channel>> {
@@ -133,10 +167,16 @@ impl Api {
     async fn make_channel(&self, gid: Query<i64>, name: Query<String>) -> Json<Channel> {
         todo!()
     }
-	
+
 	#[oai(path = "/channel", method = "put")]
 	/// Updates the name of a channel
     async fn update_channel(&self, id: Query<i64>, name: Query<String>) -> Json<Channel> {
+        todo!()
+    }
+	
+	#[oai(path = "/channel", method = "delete")]
+	/// Deletes a channel
+    async fn delete_channel(&self, id: Query<i64>) -> DeleteResponse {
         todo!()
     }
 
@@ -149,6 +189,12 @@ impl Api {
 	#[oai(path = "/channel/members", method = "put")]
 	/// Adds a member to a channel
     async fn add_channel_member(&self, cid: Query<i64>, uid: Query<i64>) -> Json<Channel> {
+        todo!()
+    }
+
+	#[oai(path = "/channel/members", method = "delete")]
+	/// Removes a member from a channel
+    async fn remove_channel_member(&self, cid: Query<i64>, uid: Query<i64>) -> DeleteResponse {
         todo!()
     }
 }
