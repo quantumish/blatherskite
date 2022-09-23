@@ -182,10 +182,10 @@ mod tests {
     use super::*;
 	use poem::test::TestClient;
 	
-	fn setup() -> TestClient<Route> {
-		let app = OpenApiService::new(Api, "Scuttlebutt", "1.0").server("http://localhost:3000/api");
-		TestClient::new(Route::new().nest("/api", app))
-	}
+	// fn setup() -> TestClient<Route> {
+	// 	let app = OpenApiService::new(Api, "Scuttlebutt", "1.0").server("http://localhost:3000/api");
+	// 	TestClient::new(Route::new().nest("/api", app))
+	// }
 
 	// #[tokio::test]
 	// async fn sanity() {
