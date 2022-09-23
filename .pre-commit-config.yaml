@@ -3,14 +3,4 @@ repos:
     rev: v1.0
     hooks:
       - id: fmt
-        name: format scuttlebutt
-        entry: "cd scuttlebutt"
       - id: cargo-check
-        name: check scuttlebutt
-        entry: "cd scuttlebutt"
-      - id: fmt
-        name: format chatterbox
-        entry: "cd chatterbox"
-      - id: cargo-check
-        name: check chatterbox
-        entry: "cd chatterbox"

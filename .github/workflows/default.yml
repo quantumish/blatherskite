@@ -3,12 +3,9 @@ on: [push]
 name: CI
 
 jobs:
-  scuttlebutt_test:
+  test:
     name: Rust project
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./scuttlebutt
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
