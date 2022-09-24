@@ -37,6 +37,14 @@ struct Channel {
     members: Vec<i64>,
 }
 
+#[derive(Object)]
+struct Message {
+    id: i64,
+    channel: i64,
+    author: i64,
+    content: String,
+}
+
 // type ServerKey = Hmac<Sha256>;
 
 // /// ApiKey authorization
@@ -143,6 +151,49 @@ enum GenericResponse {
     NotFound(PlainText<String>),
 }
 
+#[derive(ApiResponse)]
+enum MessagesResponse {
+    /// Returns the messages requested
+    #[oai(status = 200)]
+    Messages(Json<Vec<Message>>),
+    /// Invalid ID, or no messages found. Content specifies which error occured.
+    #[oai(status = 404)]
+    NotFound(PlainText<String>),
+    /// Offset or number of messages requested is bad. Content specifies which error occured.
+    #[oai(status = 400)]
+    BadRequest(PlainText<String>),
+}
+
+#[derive(ApiResponse)]
+enum MembersResponse {
+    /// Returns the members of current channel/group
+    #[oai(status = 200)]
+    Messages(Json<Vec<User>>),
+    /// Invalid ID
+    #[oai(status = 404)]
+    NotFound,
+}
+
+#[derive(ApiResponse)]
+enum GroupsResponse {
+    /// Returns the groups the user is a memmber of
+    #[oai(status = 200)]
+    Messages(Json<Vec<Group>>),
+    /// Invalid user ID
+    #[oai(status = 404)]
+    NotFound,
+}
+
+#[derive(ApiResponse)]
+enum ChannelsResponse {
+    /// Returns the channels in a group
+    #[oai(status = 200)]
+    Messages(Json<Vec<Channel>>),
+    /// Invalid group ID
+    #[oai(status = 404)]
+    NotFound,
+}
+
 #[OpenApi]
 impl Api {
     #[oai(path = "/user", method = "get")]
@@ -185,7 +236,7 @@ impl Api {
 
     #[oai(path = "/user/groups", method = "get")]
     /// Gets all groups accessible to a user
-    async fn get_groups(&self, id: Query<i64>) -> Json<Vec<Group>> {
+    async fn get_groups(&self, id: Query<i64>) -> GroupsResponse {
         todo!()
     }
 
@@ -221,7 +272,7 @@ impl Api {
 
     #[oai(path = "/group/members", method = "get")]
     /// Gets the members of the specified group
-    async fn get_group_members(&self, id: Query<i64>) -> Json<Vec<User>> {
+    async fn get_group_members(&self, id: Query<i64>) -> MembersResponse {
         todo!()
     }
 
@@ -239,7 +290,7 @@ impl Api {
 
     #[oai(path = "/group/channels", method = "get")]
     /// Gets all channels in a group that are accessible to a user
-    async fn get_channels(&self, gid: Query<i64>, uid: Query<i64>) -> Json<Vec<Channel>> {
+    async fn get_channels(&self, gid: Query<i64>, uid: Query<i64>) -> ChannelsResponse {
         todo!()
     }
 
@@ -263,7 +314,7 @@ impl Api {
 
     #[oai(path = "/channel/members", method = "get")]
     /// Gets the members that can access a channel
-    async fn get_channel_members(&self, id: Query<i64>) -> Json<Vec<User>> {
+    async fn get_channel_members(&self, id: Query<i64>) -> MembersResponse {
         todo!()
     }
 
@@ -276,6 +327,29 @@ impl Api {
     #[oai(path = "/channel/members", method = "delete")]
     /// Removes a member from a channel
     async fn remove_channel_member(&self, cid: Query<i64>, uid: Query<i64>) -> DeleteResponse {
+        todo!()
+    }
+
+    #[oai(path = "/channel/message", method = "get")]
+    /// Returns batch of messages in channel containing "term" starting at offset
+    async fn search_channel(
+        &self,
+        cid: Query<i64>,
+        term: Query<String>,
+        off: Query<u64>,
+    ) -> MessagesResponse {
+        todo!()
+    }
+
+    #[oai(path = "/channel/messages", method = "get")]
+    /// Returns batch of messages in channel. Do not use for small batches.
+    ///
+    /// For small batches, use `chatterbox`, the websocket service for messaging, instead.
+    async fn get_channel_messages(
+        &self,
+        cid: Query<i64>,
+        num_msgs: Query<u64>,
+    ) -> MessagesResponse {
         todo!()
     }
 }
