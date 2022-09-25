@@ -1,11 +1,10 @@
 use hmac::{Hmac, Mac};
 use jwt::{SignWithKey, VerifyWithKey};
-use log::{info, warn};
-use poem::{listener::TcpListener, web::Data, Request, Result, Route, Server};
+use poem::{listener::TcpListener, Request, Result, Route, Server};
 use poem_openapi::{
     auth::ApiKey,
     param::Query,
-    payload::{Json, PlainText},
+    payload::{Base64, Json, PlainText},
     *,
 };
 use serde::{Deserialize, Serialize};
@@ -45,22 +44,28 @@ struct Message {
     content: String,
 }
 
-// type ServerKey = Hmac<Sha256>;
+type ServerKey = Hmac<Sha256>;
 
-// /// ApiKey authorization
-// #[derive(SecurityScheme)]
-// #[oai(
-//     type = "api_key",
-//     key_name = "X-API-Key",
-//     in = "header",
-//     checker = "api_checker"
-// )]
-// struct MyApiKeyAuthorization(User);
+/// ApiKey authorization
+#[derive(SecurityScheme)]
+#[oai(
+    type = "api_key",
+    key_name = "X-API-Key",
+    in = "header",
+    checker = "api_checker"
+)]
+struct Authorization(User);
 
-// async fn api_checker(req: &Request, api_key: ApiKey) -> Option<User> {
-//     let server_key = req.data::<ServerKey>().unwrap();
-//     VerifyWithKey::<User>::verify_with_key(api_key.key.as_str(), server_key).ok()
-// }
+async fn api_checker(req: &Request, api_key: ApiKey) -> Option<User> {
+    let claims: User = serde_json::from_str(
+        &String::from_utf8(base64::decode(api_key.key.split(".").nth(1).unwrap()).unwrap())
+            .unwrap(),
+    )
+    .unwrap();
+    let key = todo!(); // Query DB here...
+    let server_key = req.data::<ServerKey>().unwrap();
+    VerifyWithKey::<User>::verify_with_key(api_key.key.as_str(), server_key).ok()
+}
 
 #[derive(ApiResponse)]
 enum UserResponse {
@@ -196,6 +201,20 @@ enum ChannelsResponse {
 
 #[OpenApi]
 impl Api {
+    #[oai(path = "/login", method = "post")]
+    async fn login(&self, id: Query<String>, hash: Base64<Vec<u8>>) -> Result<PlainText<String>> {
+        let key =
+            Hmac::<Sha256>::new_from_slice(&hash.0).map_err(poem::error::InternalServerError)?;
+        let token = User {
+            username: String::from("Blurgh"),
+            email: String::from("Blurgh"),
+            id: 0,
+        }
+        .sign_with_key(&key)
+        .map_err(poem::error::InternalServerError)?;
+        Ok(PlainText(token))
+    }
+
     #[oai(path = "/user", method = "get")]
     /// Gets the user with the given ID
     ///
@@ -212,16 +231,16 @@ impl Api {
         &self,
         name: Query<String>,
         email: Query<String>,
-        password: Query<String>,
+        hash: Query<String>,
     ) -> CreateUserResponse {
         todo!()
     }
 
     #[oai(path = "/user", method = "put")]
-    /// Updates a user's name and email
+    /// Updates your current name and email
     async fn update_user(
         &self,
-        id: Query<i64>,
+        auth: Authorization,
         name: Query<String>,
         email: Query<String>,
     ) -> CreateUserResponse {
@@ -229,104 +248,139 @@ impl Api {
     }
 
     #[oai(path = "/user", method = "delete")]
-    /// Deletes a user
-    async fn delete_user(&self, id: Query<i64>) -> DeleteResponse {
+    /// Deletes your user
+    async fn delete_user(&self, auth: Authorization) -> DeleteResponse {
         todo!()
     }
 
     #[oai(path = "/user/groups", method = "get")]
-    /// Gets all groups accessible to a user
-    async fn get_groups(&self, id: Query<i64>) -> GroupsResponse {
+    /// Gets all groups accessible to you
+    async fn get_groups(&self, auth: Authorization) -> GroupsResponse {
         todo!()
     }
 
     #[oai(path = "/user/groups", method = "delete")]
-    /// Leaves a group accessible to the user
-    async fn leave_group(&self, uid: Query<i64>, gid: Query<i64>) -> GenericResponse {
+    /// Leaves a group accessible to you
+    async fn leave_group(&self, auth: Authorization, gid: Query<i64>) -> GenericResponse {
         todo!()
     }
 
     #[oai(path = "/group", method = "get")]
     /// Gets the group with the given ID
-    async fn get_group(&self, id: Query<i64>) -> GroupResponse {
+    async fn get_group(&self, auth: Authorization, id: Query<i64>) -> GroupResponse {
         todo!()
     }
 
     #[oai(path = "/group", method = "post")]
     /// Creates a new group
-    async fn make_group(&self, name: Query<String>) -> CreateGroupResponse {
+    async fn make_group(&self, auth: Authorization, name: Query<String>) -> CreateGroupResponse {
         todo!()
     }
 
     #[oai(path = "/group", method = "put")]
     /// Updates the name of an existing group
-    async fn update_group(&self, id: Query<i64>, name: Query<String>) -> CreateGroupResponse {
+    async fn update_group(
+        &self,
+        auth: Authorization,
+        id: Query<i64>,
+        name: Query<String>,
+    ) -> CreateGroupResponse {
         todo!()
     }
 
     #[oai(path = "/group", method = "delete")]
-    /// Deletes a user
-    async fn delete_group(&self, id: Query<i64>) -> DeleteResponse {
+    /// Deletes a group
+    async fn delete_group(&self, auth: Authorization, id: Query<i64>) -> DeleteResponse {
         todo!()
     }
 
     #[oai(path = "/group/members", method = "get")]
     /// Gets the members of the specified group
-    async fn get_group_members(&self, id: Query<i64>) -> MembersResponse {
+    async fn get_group_members(&self, auth: Authorization, id: Query<i64>) -> MembersResponse {
         todo!()
     }
 
     #[oai(path = "/group/members", method = "put")]
     /// Adds a member to an existing group
-    async fn add_group_member(&self, gid: Query<i64>, uid: Query<i64>) -> GenericResponse {
+    async fn add_group_member(
+        &self,
+        auth: Authorization,
+        gid: Query<i64>,
+        uid: Query<i64>,
+    ) -> GenericResponse {
         todo!()
     }
 
     #[oai(path = "/group/members", method = "delete")]
-    /// Removes a member to an existing group
-    async fn remove_group_member(&self, gid: Query<i64>, uid: Query<i64>) -> DeleteResponse {
+    /// Removes a member from an existing group
+    async fn remove_group_member(
+        &self,
+        auth: Authorization,
+        gid: Query<i64>,
+        uid: Query<i64>,
+    ) -> DeleteResponse {
         todo!()
     }
 
     #[oai(path = "/group/channels", method = "get")]
-    /// Gets all channels in a group that are accessible to a user
-    async fn get_channels(&self, gid: Query<i64>, uid: Query<i64>) -> ChannelsResponse {
+    /// Gets all channels in a group that are accessible to you
+    async fn get_channels(&self, auth: Authorization, gid: Query<i64>) -> ChannelsResponse {
         todo!()
     }
 
     #[oai(path = "/group/channels", method = "post")]
     /// Creates a channel in a group
-    async fn make_channel(&self, gid: Query<i64>, name: Query<String>) -> CreateChannelResponse {
+    async fn make_channel(
+        &self,
+        auth: Authorization,
+        gid: Query<i64>,
+        name: Query<String>,
+    ) -> CreateChannelResponse {
         todo!()
     }
 
     #[oai(path = "/channel", method = "put")]
     /// Updates the name of a channel
-    async fn update_channel(&self, id: Query<i64>, name: Query<String>) -> CreateChannelResponse {
+    async fn update_channel(
+        &self,
+        auth: Authorization,
+        id: Query<i64>,
+        name: Query<String>,
+    ) -> CreateChannelResponse {
         todo!()
     }
 
     #[oai(path = "/channel", method = "delete")]
     /// Deletes a channel
-    async fn delete_channel(&self, id: Query<i64>) -> DeleteResponse {
+    async fn delete_channel(&self, auth: Authorization, id: Query<i64>) -> DeleteResponse {
         todo!()
     }
 
     #[oai(path = "/channel/members", method = "get")]
     /// Gets the members that can access a channel
-    async fn get_channel_members(&self, id: Query<i64>) -> MembersResponse {
+    async fn get_channel_members(&self, auth: Authorization, id: Query<i64>) -> MembersResponse {
         todo!()
     }
 
     #[oai(path = "/channel/members", method = "put")]
     /// Adds a member to a channel
-    async fn add_channel_member(&self, cid: Query<i64>, uid: Query<i64>) -> GenericResponse {
+    async fn add_channel_member(
+        &self,
+        auth: Authorization,
+        id: Query<i64>,
+        uid: Query<i64>,
+    ) -> GenericResponse {
         todo!()
     }
 
     #[oai(path = "/channel/members", method = "delete")]
     /// Removes a member from a channel
-    async fn remove_channel_member(&self, cid: Query<i64>, uid: Query<i64>) -> DeleteResponse {
+    async fn remove_channel_member(
+        &self,
+        auth: Authorization,
+        cid: Query<i64>,
+        uid: Query<i64>,
+    ) -> DeleteResponse {
         todo!()
     }
 
@@ -334,6 +388,7 @@ impl Api {
     /// Returns batch of messages in channel containing "term" starting at offset
     async fn search_channel(
         &self,
+        auth: Authorization,
         cid: Query<i64>,
         term: Query<String>,
         off: Query<u64>,
@@ -347,6 +402,7 @@ impl Api {
     /// For small batches, use `chatterbox`, the websocket service for messaging, instead.
     async fn get_channel_messages(
         &self,
+        auth: Authorization,
         cid: Query<i64>,
         num_msgs: Query<u64>,
     ) -> MessagesResponse {
