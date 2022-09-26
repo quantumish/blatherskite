@@ -4,14 +4,14 @@ use poem_openapi::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Object, Serialize, Deserialize)]
+#[derive(Object, Serialize, Deserialize, Debug, Eq, PartialEq)]
 pub struct User {
     pub id: i64,
     pub username: String,
     pub email: String,
 }
 
-#[derive(Object)]
+#[derive(Object, Serialize, Deserialize, Debug, Eq, PartialEq)]
 pub struct Group {
     pub id: i64,
     pub name: String,
@@ -21,14 +21,14 @@ pub struct Group {
     pub channels: Vec<i64>,
 }
 
-#[derive(Object)]
+#[derive(Object, Serialize, Deserialize, Debug, Eq, PartialEq)]
 pub struct Channel {
     pub id: i64,
     pub name: String,
     pub members: Vec<i64>,
 }
 
-#[derive(Object)]
+#[derive(Object, Serialize, Deserialize, Debug, Eq, PartialEq)]
 pub struct Message {
     pub id: i64,
     pub channel: i64,
@@ -40,22 +40,28 @@ pub struct Message {
 pub enum UserResponse {
     /// Returns the user requested.
     #[oai(status = 200)]
-    User(Json<User>),
+    Success(Json<User>),
     /// Invalid ID. Content specifies which of the IDs passed is invalid.
     #[oai(status = 404)]
-    NotFound(PlainText<String>),
+    NotFound,
+    /// Internal server error: likely due to a database operation failing
+    #[oai(status = 500)]
+    InternalError(PlainText<String>),
 }
 
 #[derive(ApiResponse)]
 pub enum CreateUserResponse {
     /// Returns the user requested.
     #[oai(status = 200)]
-    User(Json<User>),
+    Success(Json<User>),
     /// Recieved a bad argument when specifying the user. Returns error type, such as:
     /// - found empty string for any of the arguments
     /// - invalid email
     #[oai(status = 400)]
-    BadRequest,
+    BadRequest(PlainText<String>),
+    /// Internal server error: likely due to a database operation failing
+    #[oai(status = 500)]
+    InternalError(PlainText<String>),
 }
 
 #[derive(ApiResponse)]

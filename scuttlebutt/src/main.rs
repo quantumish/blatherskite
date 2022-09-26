@@ -1,6 +1,8 @@
+use cassandra_cpp::*;
+use chrono::{DateTime, Duration, Local};
 use hmac::{Hmac, Mac};
 use jwt::{SignWithKey, VerifyWithKey};
-use poem::{listener::TcpListener, Request, Result, Route, Server};
+use poem::{listener::TcpListener, web::Data, EndpointExt, Request, Result, Route, Server};
 use poem_openapi::{
     auth::ApiKey,
     param::Query,
@@ -9,11 +11,19 @@ use poem_openapi::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
+use std::sync::{Arc, Mutex};
 
 pub mod responses;
 pub use responses::*;
+use rustflake::Snowflake;
 
 type ServerKey = Hmac<Sha256>;
+
+#[derive(Serialize, Deserialize)]
+struct Claims {
+    id: i64,
+    exp: DateTime<Local>,
+}
 
 /// ApiKey authorization
 #[derive(SecurityScheme)]
@@ -26,28 +36,58 @@ type ServerKey = Hmac<Sha256>;
 struct Authorization(User);
 
 async fn api_checker(req: &Request, api_key: ApiKey) -> Option<User> {
-    let claims: User = serde_json::from_str(
+    let claims: Claims = serde_json::from_str(
         &String::from_utf8(base64::decode(api_key.key.split(".").nth(1).unwrap()).unwrap())
             .unwrap(),
     )
     .unwrap();
     let key = todo!(); // Query DB here...
-    let server_key = req.data::<ServerKey>().unwrap();
-    VerifyWithKey::<User>::verify_with_key(api_key.key.as_str(), server_key).ok()
+                       // let server_key = req.data::<ServerKey>().unwrap();
+                       // VerifyWithKey::<User>::verify_with_key(api_key.key.as_str(), server_key).ok()
 }
 
-struct Api;
+struct Api {
+    sess: Session,
+    kspc: String,
+}
+
+fn gen_id() -> i64 {
+    static STATE: Mutex<Option<Snowflake>> = Mutex::new(None);
+
+    STATE
+        .lock()
+        .unwrap()
+        .get_or_insert_with(|| Snowflake::default())
+        .generate()
+}
 
 #[OpenApi]
 impl Api {
+    fn new(keyspc: &str) -> Api {
+        let contact_points = "127.0.0.1";
+        let mut cluster = Cluster::default();
+        cluster.set_contact_points(contact_points).unwrap();
+        cluster.set_load_balance_round_robin();
+        let session = cluster.connect().unwrap();
+
+        let space_stmt = &stmt!(&format!("CREATE KEYSPACE IF NOT EXISTS {keyspc} WITH replication = {{'class':'SimpleStrategy', 'replication_factor': 1}}"));
+        let table_stmt = &stmt!(&format!("CREATE TABLE IF NOT EXISTS {keyspc}.users (id bigint PRIMARY KEY, name text, email text, hash text);"));
+        session.execute(space_stmt).wait().unwrap();
+        session.execute(table_stmt).wait().unwrap();
+
+        Api {
+            sess: session,
+            kspc: String::from(keyspc),
+        }
+    }
+
     #[oai(path = "/login", method = "post")]
-    async fn login(&self, id: Query<String>, hash: Base64<Vec<u8>>) -> Result<PlainText<String>> {
+    async fn login(&self, id: Query<i64>, hash: Base64<Vec<u8>>) -> Result<PlainText<String>> {
         let key =
             Hmac::<Sha256>::new_from_slice(&hash.0).map_err(poem::error::InternalServerError)?;
-        let token = User {
-            username: String::from("Blurgh"),
-            email: String::from("Blurgh"),
-            id: 0,
+        let token = Claims {
+            id: id.0,
+            exp: Local::now() + Duration::days(1),
         }
         .sign_with_key(&key)
         .map_err(poem::error::InternalServerError)?;
@@ -61,7 +101,30 @@ impl Api {
     ///
     /// Call `/user?id=1234` to get the user with id 1234
     async fn get_user(&self, id: Query<i64>) -> UserResponse {
-        todo!()
+        use UserResponse::*;
+        let insert_stmt = &stmt!(&format!(
+            "SELECT id, name, email FROM {}.users WHERE id={};",
+            self.kspc, id.0
+        ));
+        match self.sess.execute(insert_stmt).wait() {
+            Ok(res) => {
+                if res.row_count() == 1 {
+                    let row = res.first_row().unwrap();
+                    Success(Json(User {
+                        id: id.0,
+                        username: row.get(1).unwrap(),
+                        email: row.get(2).unwrap(),
+                    }))
+                } else if res.row_count() == 0 {
+                    NotFound
+                } else {
+                    InternalError(PlainText(
+                        "Found duplicate ID (or negative rows??)! Giving up!".to_string(),
+                    ))
+                }
+            }
+            Err(e) => InternalError(PlainText(e.to_string())),
+        }
     }
 
     #[oai(path = "/user", method = "post")]
@@ -72,7 +135,24 @@ impl Api {
         email: Query<String>,
         hash: Query<String>,
     ) -> CreateUserResponse {
-        todo!()
+        use CreateUserResponse::*;
+        if hash.0.len() != 64 {
+            return BadRequest(PlainText("Invalid hash provided.".to_string()));
+        }
+        let id = gen_id();
+        let insert_stmt = &stmt!(&format!(
+            "INSERT INTO {}.users (id, name, email, hash) VALUES({},'{}','{}','{}');",
+            self.kspc, id, name.0, email.0, hash.0
+        ));
+        if let Err(e) = self.sess.execute(insert_stmt).wait() {
+            InternalError(PlainText(e.to_string()))
+        } else {
+            Success(Json(User {
+                id,
+                username: name.0,
+                email: email.0,
+            }))
+        }
     }
 
     #[oai(path = "/user", method = "put")]
@@ -256,7 +336,7 @@ async fn main() -> Result<(), std::io::Error> {
     }
     tracing_subscriber::fmt::init();
 
-    let api_service = OpenApiService::new(Api, "Scuttlebutt", "1.0")
+    let api_service = OpenApiService::new(Api::new("bsk"), "Scuttlebutt", "1.0")
         .description(
             "Scuttlebutt is the REST API for managing everything but sending/receiving messages \
 					  - which means creating/updating/deleting all of your users/groups/channels.",
@@ -264,31 +344,112 @@ async fn main() -> Result<(), std::io::Error> {
         .server("http://localhost:3000/api");
 
     let ui = api_service.swagger_ui();
+    let spec = api_service.spec();
 
-    // let wat = b"whee";
-    // let server_key = Hmac::<Sha256>::new_from_slice(wat).expect("valid server key");
-    // let server_key2 = Hmac::<Sha256>::new_from_hex
-    // println!("{:?}", server_key.);
     Server::new(TcpListener::bind("127.0.0.1:3000"))
-        .run(Route::new().nest("/api", api_service).nest("/", ui))
+        .run(
+            Route::new()
+                .nest("/api", api_service)
+                .nest("/", ui)
+                .at("/spec", poem::endpoint::make_sync(move |_| spec.clone())),
+        )
         .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use poem::test::TestClient;
+    use more_asserts::*;
+    use poem::{
+        http::StatusCode,
+        test::{TestClient, TestResponse},
+    };
+    use pretty_assertions::{assert_eq, assert_ne};
+    use sha2::Digest;
 
-    // fn setup() -> TestClient<Route> {
-    // 	let app = OpenApiService::new(Api, "Scuttlebutt", "1.0").server("http://localhost:3000/api");
-    // 	TestClient::new(Route::new().nest("/api", app))
-    // }
+    fn setup() -> TestClient<Route> {
+        let app =
+            OpenApiService::new(Api, "Scuttlebutt", "1.0").server("http://localhost:3000/api");
+        TestClient::new(Route::new().nest("/api", app))
+    }
 
-    // #[tokio::test]
-    // async fn sanity() {
-    // 	let cli = setup();
-    // 	let resp = cli.get("/api/hello").send().await;
-    // 	resp.assert_status_is_ok();
-    // 	resp.assert_text("whee").await;
-    // }
+    fn hash_pass(pass: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(pass);
+        base64::encode(hasher.finalize())
+    }
+
+    async fn make_user(cli: &TestClient<Route>, name: &str, email: &str, pass: &str) -> User {
+        let mut hasher = Sha256::new();
+        hasher.update(pass);
+        let hash = hash_pass(pass);
+        let resp = cli
+            .post(format!(
+                "/api/user?name={}?email={}?hash={}",
+                name, email, hash
+            ))
+            .send()
+            .await;
+        resp.assert_status_is_ok();
+        resp.json().await.value().deserialize::<User>()
+    }
+
+    #[tokio::test]
+    async fn test_make_user() {
+        let cli = setup();
+        let resp = make_user(&cli, "test", "test@example.com", "12345").await;
+
+        // TODO questionable
+        let mut id_gen = snowflake::SnowflakeIdGenerator::new(1, 1);
+        assert_ge!(id_gen.real_time_generate(), resp.id);
+
+        assert_eq!(resp.email, "test@example.com");
+        assert_eq!(resp.username, "test");
+    }
+
+    #[tokio::test]
+    async fn test_login_bad_hash() {
+        let cli = setup();
+        let resp = cli
+            .post("/api/user?name=test?email=test@example.com?hash=abc")
+            .send()
+            .await;
+        resp.assert_status(StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_get_user() {
+        let cli = setup();
+        let user = make_user(&cli, "test", "test@example.com", "12345").await;
+        let resp = cli.get(format!("/api/user?id={}", user.id)).send().await;
+        resp.assert_status_is_ok();
+        let ret_user = resp.json().await.value().deserialize::<User>();
+        assert_eq!(user, ret_user);
+    }
+
+    #[tokio::test]
+    async fn test_put_user() {
+        let cli = setup();
+        let user = make_user(&cli, "test", "test@example.com", "12345").await;
+        let resp = cli
+            .put(format!("/api/user?name=fred?email=whoo@whee.com?hash=abc"))
+            .send()
+            .await;
+        resp.assert_status_is_ok();
+        let ret_user = resp.json().await.value().deserialize::<User>();
+        assert_eq!(ret_user.email, "whoo@whee.com");
+        assert_eq!(ret_user.username, "fred");
+        // User should retain their underlying ID
+        assert_eq!(user.id, ret_user.id);
+    }
+
+    #[tokio::test]
+    async fn test_del_user() {
+        let cli = setup();
+        let user = make_user(&cli, "test", "test@example.com", "12345").await;
+        let resp = cli.delete(format!("/api/user?id={}", user.id)).send().await;
+        resp.assert_status_is_ok();
+        let resp = cli.get(format!("/api/user?id={}", user.id)).send().await;
+        resp.assert_status(StatusCode::NOT_FOUND);
+    }
 }
