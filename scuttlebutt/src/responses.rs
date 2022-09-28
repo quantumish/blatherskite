@@ -37,6 +37,22 @@ pub struct Message {
 }
 
 #[derive(ApiResponse)]
+pub enum LoginResponse {
+    /// Returns the authentication token requested.
+    #[oai(status = 200)]
+    Success(PlainText<String>),
+    /// User ID not found
+    #[oai(status = 404)]
+    NotFound,
+    /// Incorrect hash provided
+    #[oai(status = 401)]
+    Unauthorized,
+    /// Internal server error when attempting to access database/sign key
+    #[oai(status = 500)]
+    InternalError(PlainText<String>),
+}
+
+#[derive(ApiResponse)]
 pub enum UserResponse {
     /// Returns the user requested.
     #[oai(status = 200)]

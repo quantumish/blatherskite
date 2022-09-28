@@ -1,6 +1,6 @@
 use cassandra_cpp::*;
 use chrono::{DateTime, Duration, Local};
-use hmac::{Hmac, Mac};
+use hmac::Hmac;
 use jwt::{SignWithKey, VerifyWithKey};
 use poem::{listener::TcpListener, web::Data, EndpointExt, Request, Result, Route, Server};
 use poem_openapi::{
@@ -9,6 +9,7 @@ use poem_openapi::{
     payload::{Base64, Json, PlainText},
     *,
 };
+use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::sync::{Arc, Mutex};
@@ -41,9 +42,11 @@ async fn api_checker(req: &Request, api_key: ApiKey) -> Option<User> {
             .unwrap(),
     )
     .unwrap();
-    let key = todo!(); // Query DB here...
-                       // let server_key = req.data::<ServerKey>().unwrap();
-                       // VerifyWithKey::<User>::verify_with_key(api_key.key.as_str(), server_key).ok()
+    if claims.exp < Local::now() {
+        return None;
+    }
+    let server_key = req.data::<ServerKey>().unwrap();
+    VerifyWithKey::<User>::verify_with_key(api_key.key.as_str(), server_key).ok()
 }
 
 struct Api {
@@ -70,10 +73,11 @@ impl Api {
         cluster.set_load_balance_round_robin();
         let session = cluster.connect().unwrap();
 
-        let space_stmt = &stmt!(&format!("CREATE KEYSPACE IF NOT EXISTS {keyspc} WITH replication = {{'class':'SimpleStrategy', 'replication_factor': 1}}"));
-        let table_stmt = &stmt!(&format!("CREATE TABLE IF NOT EXISTS {keyspc}.users (id bigint PRIMARY KEY, name text, email text, hash text);"));
-        session.execute(space_stmt).wait().unwrap();
-        session.execute(table_stmt).wait().unwrap();
+        session.execute(&stmt!(&format!("CREATE KEYSPACE IF NOT EXISTS {keyspc} WITH replication = {{'class':'SimpleStrategy', 'replication_factor': 1}}"))).wait().unwrap();
+        session.execute(&stmt!(&format!("CREATE TABLE IF NOT EXISTS {keyspc}.users (id bigint PRIMARY KEY, name text, email text, hash text);"))).wait().unwrap();
+        session.execute(&stmt!(&format!("CREATE TABLE IF NOT EXISTS {keyspc}.channels (id bigint PRIMARY KEY, name text, group bigint, members list<bigint>, channels list<bigint>);"))).wait().unwrap();
+        session.execute(&stmt!(&format!("CREATE TABLE IF NOT EXISTS {keyspc}.user_groups (id bigint PRIMARY KEY, groups list<bigint>);"))).wait().unwrap();
+        session.execute(&stmt!(&format!("CREATE TABLE IF NOT EXISTS {keyspc}.messages (group bigint, channel bigint, author bigint, time timestamp, content text, PRIMARY KEY ((group, channel)));"))).wait().unwrap();
 
         Api {
             sess: session,
@@ -82,16 +86,39 @@ impl Api {
     }
 
     #[oai(path = "/login", method = "post")]
-    async fn login(&self, id: Query<i64>, hash: Base64<Vec<u8>>) -> Result<PlainText<String>> {
-        let key =
-            Hmac::<Sha256>::new_from_slice(&hash.0).map_err(poem::error::InternalServerError)?;
-        let token = Claims {
-            id: id.0,
-            exp: Local::now() + Duration::days(1),
+    async fn login(
+        &self,
+        key: Data<&ServerKey>,
+        id: Query<i64>,
+        hash: Base64<Vec<u8>>,
+    ) -> LoginResponse {
+        use LoginResponse::*;
+        let hash_stmt = &stmt!(&format!(
+            "SELECT id, name, email, hash FROM {}.users WHERE id={};",
+            self.kspc, id.0
+        ));
+        let res = self.sess.execute(hash_stmt).wait().unwrap();
+        if res.row_count() == 1 {
+            let row = res.first_row().unwrap();
+            let db_hash: String = row.get(3).unwrap();
+            if base64::decode(db_hash).unwrap() != hash.0 {
+                Unauthorized
+            } else {
+                let row = res.first_row().unwrap();
+                let token = Claims {
+                    id: id.0,
+                    exp: Local::now() + Duration::days(1),
+                }
+                .sign_with_key(key.0);
+                Success(PlainText(token.unwrap().to_string()))
+            }
+        } else if res.row_count() == 0 {
+            NotFound
+        } else {
+            InternalError(PlainText(
+                "Found multiple (or negative?) number of rows.".to_string(),
+            ))
         }
-        .sign_with_key(&key)
-        .map_err(poem::error::InternalServerError)?;
-        Ok(PlainText(token))
     }
 
     #[oai(path = "/user", method = "get")]
@@ -331,6 +358,7 @@ impl Api {
 
 #[tokio::main]
 async fn main() -> Result<(), std::io::Error> {
+    use hmac::Mac;
     if std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var("RUST_LOG", "poem=debug");
     }
@@ -346,12 +374,18 @@ async fn main() -> Result<(), std::io::Error> {
     let ui = api_service.swagger_ui();
     let spec = api_service.spec();
 
+    let key: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(7)
+        .map(char::from)
+        .collect();
     Server::new(TcpListener::bind("127.0.0.1:3000"))
         .run(
             Route::new()
                 .nest("/api", api_service)
                 .nest("/", ui)
-                .at("/spec", poem::endpoint::make_sync(move |_| spec.clone())),
+                .at("/spec", poem::endpoint::make_sync(move |_| spec.clone()))
+                .data(ServerKey::new_from_slice(&key.as_bytes()).unwrap()),
         )
         .await
 }
@@ -368,8 +402,8 @@ mod tests {
     use sha2::Digest;
 
     fn setup() -> TestClient<Route> {
-        let app =
-            OpenApiService::new(Api, "Scuttlebutt", "1.0").server("http://localhost:3000/api");
+        let app = OpenApiService::new(Api::new("test"), "Scuttlebutt", "1.0")
+            .server("http://localhost:3000/api");
         TestClient::new(Route::new().nest("/api", app))
     }
 
