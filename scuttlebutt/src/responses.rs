@@ -47,6 +47,9 @@ pub enum LoginResponse {
     /// Incorrect hash provided
     #[oai(status = 401)]
     Unauthorized,
+    /// Hash provided is of incorrect length
+    #[oai(status = 400)]
+    BadRequest,
     /// Internal server error when attempting to access database/sign key
     #[oai(status = 500)]
     InternalError(PlainText<String>),
@@ -57,7 +60,7 @@ pub enum UserResponse {
     /// Returns the user requested.
     #[oai(status = 200)]
     Success(Json<User>),
-    /// Invalid ID. Content specifies which of the IDs passed is invalid.
+    /// Invalid ID.
     #[oai(status = 404)]
     NotFound,
     /// Internal server error: likely due to a database operation failing
@@ -91,6 +94,9 @@ pub enum DeleteResponse {
     /// Invalid ID. Content specifies which of the IDs passed is invalid.
     #[oai(status = 404)]
     NotFound(PlainText<String>),
+    /// Internal server error: likely due to a database operation failing
+    #[oai(status = 500)]
+    InternalError(PlainText<String>),
 }
 
 #[derive(ApiResponse)]
@@ -107,12 +113,15 @@ pub enum GroupResponse {
 pub enum CreateGroupResponse {
     /// Returns the group requested
     #[oai(status = 200)]
-    Group(Json<Group>),
+    Success(Json<Group>),
     /// Invalid parameter, such as:
     /// - empty string for name
     /// - bad string
     #[oai(status = 400)]
     BadRequest(PlainText<String>),
+    /// Internal server error: likely due to a database operation failing
+    #[oai(status = 500)]
+    InternalError(PlainText<String>),
 }
 
 #[derive(ApiResponse)]
@@ -135,6 +144,9 @@ pub enum CreateChannelResponse {
     /// - bad string
     #[oai(status = 400)]
     BadRequest(PlainText<String>),
+    /// Invalid ID. Content specifies which of the IDs passed is invalid.
+    #[oai(status = 404)]
+    NotFound(PlainText<String>),
 }
 
 #[derive(ApiResponse)]
