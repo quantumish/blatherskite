@@ -25,6 +25,7 @@ pub struct Group {
 pub struct Channel {
     pub id: i64,
     pub name: String,
+    pub group: i64,
     pub members: Vec<i64>,
 }
 
@@ -103,10 +104,13 @@ pub enum DeleteResponse {
 pub enum GroupResponse {
     /// Returns the group requested
     #[oai(status = 200)]
-    Group(Json<Group>),
+    Success(Json<Group>),
     /// Invalid ID.
     #[oai(status = 404)]
     NotFound,
+    /// Internal server error when attempting to access database
+    #[oai(status = 500)]
+    InternalError(PlainText<String>),
 }
 
 #[derive(ApiResponse)]
@@ -128,17 +132,20 @@ pub enum CreateGroupResponse {
 pub enum ChannelResponse {
     /// Returns the channel requested
     #[oai(status = 200)]
-    Channel(Json<Channel>),
-    /// Invalid ID. Content specifies which of the IDs passed is invalid.
+    Success(Json<Channel>),
+    /// Invalid ID.
     #[oai(status = 404)]
-    NotFound(PlainText<String>),
+    NotFound,
+    /// Internal server error: likely due to a database operation failing
+    #[oai(status = 500)]
+    InternalError(PlainText<String>),
 }
 
 #[derive(ApiResponse)]
 pub enum CreateChannelResponse {
     /// Returns the channel requested
     #[oai(status = 200)]
-    Channel(Json<Channel>),
+    Success(Json<Channel>),
     /// Invalid parameter, such as:
     /// - empty string for name
     /// - bad string
@@ -147,23 +154,32 @@ pub enum CreateChannelResponse {
     /// Invalid ID. Content specifies which of the IDs passed is invalid.
     #[oai(status = 404)]
     NotFound(PlainText<String>),
+    /// Internal server error: likely due to a database operation failing
+    #[oai(status = 500)]
+    InternalError(PlainText<String>),
 }
 
 #[derive(ApiResponse)]
 pub enum GenericResponse {
-    /// Action succeeded
+    /// Action succeeded.
     #[oai(status = 200)]
     Success,
+    /// Recieved a bad argument.    
+    #[oai(status = 400)]
+    BadRequest(PlainText<String>),
     /// Invalid ID. Content specifies which of the IDs passed is invalid.
     #[oai(status = 404)]
     NotFound(PlainText<String>),
+    /// Internal server error: likely due to a database operation failing
+    #[oai(status = 500)]
+    InternalError(PlainText<String>),
 }
 
 #[derive(ApiResponse)]
 pub enum MessagesResponse {
     /// Returns the messages requested
     #[oai(status = 200)]
-    Messages(Json<Vec<Message>>),
+    Success(Json<Vec<Message>>),
     /// Invalid ID, or no messages found. Content specifies which error occured.
     #[oai(status = 404)]
     NotFound(PlainText<String>),
@@ -176,7 +192,7 @@ pub enum MessagesResponse {
 pub enum MembersResponse {
     /// Returns the members of current channel/group
     #[oai(status = 200)]
-    Messages(Json<Vec<User>>),
+    Success(Json<Vec<User>>),
     /// Invalid ID
     #[oai(status = 404)]
     NotFound,
@@ -186,7 +202,7 @@ pub enum MembersResponse {
 pub enum GroupsResponse {
     /// Returns the groups the user is a memmber of
     #[oai(status = 200)]
-    Messages(Json<Vec<Group>>),
+    Success(Json<Vec<Group>>),
     /// Invalid user ID
     #[oai(status = 404)]
     NotFound,
@@ -196,8 +212,11 @@ pub enum GroupsResponse {
 pub enum ChannelsResponse {
     /// Returns the channels in a group
     #[oai(status = 200)]
-    Messages(Json<Vec<Channel>>),
+    Success(Json<Vec<Channel>>),
     /// Invalid group ID
     #[oai(status = 404)]
     NotFound,
+    /// Internal server error: likely due to a database operation failing
+    #[oai(status = 500)]
+    InternalError(PlainText<String>),
 }

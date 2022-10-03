@@ -53,7 +53,5 @@ async fn main() -> Result<(), std::io::Error> {
         get(ws.data(tokio::sync::broadcast::channel::<String>(32).0)),
     );
 
-    Server::new(TcpListener::bind("127.0.0.1:3001"))
-        .run(app)
-        .await
+    Server::new(TcpListener::bind("127.0.0.1:3001")).run(app).await
 }
