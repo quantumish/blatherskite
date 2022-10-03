@@ -119,7 +119,7 @@ impl Api {
 		let row = res.first_row().unwrap();
 		let channels: SetIterator = row.get(0).unwrap();
 		for channel in channels {
-			self.__remove_channel_member(channel.get_i64().unwrap(), uid);
+			self.__remove_channel_member(channel.get_i64().unwrap(), uid).await;
 		}
 		self.sess.execute(&stmt!(&format!(
 			"UPDATE {}.user_groups SET groups = groups - {{{}}} WHERE id={};", self.kspc, gid, uid
@@ -259,7 +259,7 @@ impl Api {
 		))).wait().unwrap();
 
 		let res = self.sess.execute(&stmt!(&format!(
-			"SELECT id, name, members, channels FROM {}.user_groups WHERE id={};",
+			"SELECT groups FROM {}.user_groups WHERE id={};",
 			self.kspc, auth.0.id
 		))).wait().unwrap();
 		let groups: SetIterator = match res.row_count() {
@@ -267,7 +267,7 @@ impl Api {
 			_ => res.first_row().unwrap().get(0).unwrap(),
 		};
 		for group in groups {
-			self.__remove_group_member(group.get_i64().unwrap(), id);
+			self.__remove_group_member(group.get_i64().unwrap(), id).await;
 		}
 		self.sess.execute(&stmt!(&format!(
 			"DELETE FROM {}.user_groups WHERE id={};", self.kspc, id
@@ -312,7 +312,7 @@ impl Api {
 		if let Err(e) = self.validate_id("groups", gid.0) {
 			return NotFound(PlainText("Didn't find group or experienced database error.".to_string()));
 		}
-		self.__remove_group_member(gid.0, auth.0.id);
+		self.__remove_group_member(gid.0, auth.0.id).await;
 		Success
 	}
 
@@ -486,7 +486,7 @@ impl Api {
 		} else if let Err(_) = self.validate_id("users", uid.0) {
 			return NotFound(PlainText("User not found".to_string()))
 		}
-		self.__remove_group_member(gid.0, uid.0);
+		self.__remove_group_member(gid.0, uid.0).await;
 		Success
 	}
 
@@ -639,7 +639,7 @@ impl Api {
 		} else if let Err(_) = self.validate_id("users", uid.0) {
 			return NotFound(PlainText("User not found".to_string()))
 		}
-		self.__remove_channel_member(cid.0, uid.0);
+		self.__remove_channel_member(cid.0, uid.0).await;
 		Success
 	}
 
