@@ -84,7 +84,7 @@ impl Api {
 		session.execute(&stmt!(&format!("CREATE TABLE IF NOT EXISTS {keyspc}.groups (id bigint PRIMARY KEY, name text, members set<bigint>, channels set<bigint>);"))).wait().unwrap();
 		session.execute(&stmt!(&format!("CREATE TABLE IF NOT EXISTS {keyspc}.channels (id bigint PRIMARY KEY, name text, group bigint, members set<bigint>);"))).wait().unwrap();
 		session.execute(&stmt!(&format!("CREATE TABLE IF NOT EXISTS {keyspc}.user_groups (id bigint PRIMARY KEY, groups set<bigint>);"))).wait().unwrap();
-		session.execute(&stmt!(&format!("CREATE TABLE IF NOT EXISTS {keyspc}.messages (group bigint, channel bigint, author bigint, time timestamp, content text, PRIMARY KEY ((group, channel)));"))).wait().unwrap();
+		session.execute(&stmt!(&format!("CREATE TABLE IF NOT EXISTS {keyspc}.messages (channel bigint, id bigint, author bigint, time timestamp, content text, PRIMARY KEY (channel, id)) WITH CLUSTERING ORDER BY (id DESC);"))).wait().unwrap();
 
 		Api {
 			sess: session,
@@ -103,13 +103,13 @@ impl Api {
 		
 	}
 
-	async fn __remove_channel_member(&self, cid: i64, uid: i64) {
+	fn __remove_channel_member(&self, cid: i64, uid: i64) {
 		self.sess.execute(&stmt!(&format!(
 			"UPDATE {}.channels SET members = members - {{{}}} WHERE id={};", self.kspc, uid, cid
 		))).wait().unwrap();
 	}
 
-	async fn __remove_group_member(&self, gid: i64, uid: i64) {
+	fn __remove_group_member(&self, gid: i64, uid: i64) {
 		self.sess.execute(&stmt!(&format!(
 			"UPDATE {}.groups SET members = members - {{{}}} WHERE id={};", self.kspc, uid, gid
 		))).wait().unwrap();
@@ -119,7 +119,7 @@ impl Api {
 		let row = res.first_row().unwrap();
 		let channels: SetIterator = row.get(0).unwrap();
 		for channel in channels {
-			self.__remove_channel_member(channel.get_i64().unwrap(), uid).await;
+			self.__remove_channel_member(channel.get_i64().unwrap(), uid);
 		}
 		self.sess.execute(&stmt!(&format!(
 			"UPDATE {}.user_groups SET groups = groups - {{{}}} WHERE id={};", self.kspc, gid, uid
@@ -257,7 +257,6 @@ impl Api {
 		self.sess.execute(&stmt!(&format!(
 			"DELETE FROM {}.users WHERE id={};", self.kspc, id
 		))).wait().unwrap();
-
 		let res = self.sess.execute(&stmt!(&format!(
 			"SELECT groups FROM {}.user_groups WHERE id={};",
 			self.kspc, auth.0.id
@@ -267,7 +266,7 @@ impl Api {
 			_ => res.first_row().unwrap().get(0).unwrap(),
 		};
 		for group in groups {
-			self.__remove_group_member(group.get_i64().unwrap(), id).await;
+			self.__remove_group_member(group.get_i64().unwrap(), id);
 		}
 		self.sess.execute(&stmt!(&format!(
 			"DELETE FROM {}.user_groups WHERE id={};", self.kspc, id
@@ -280,7 +279,7 @@ impl Api {
 	async fn get_groups(&self, auth: Authorization) -> GroupsResponse {
 		use GroupsResponse::*;
 		let res = self.sess.execute(&stmt!(&format!(
-			"SELECT id, name, members, channels FROM {}.user_groups WHERE id={};",
+			"SELECT groups FROM {}.user_groups WHERE id={};",
 			self.kspc, auth.0.id
 		))).wait().unwrap();
 		
@@ -312,7 +311,7 @@ impl Api {
 		if let Err(e) = self.validate_id("groups", gid.0) {
 			return NotFound(PlainText("Didn't find group or experienced database error.".to_string()));
 		}
-		self.__remove_group_member(gid.0, auth.0.id).await;
+		self.__remove_group_member(gid.0, auth.0.id);
 		Success
 	}
 
@@ -469,6 +468,21 @@ impl Api {
 			"UPDATE {}.groups SET members = members + {{{}}} WHERE id = {};",
 			self.kspc, uid.0, gid.0
 		))).wait().unwrap();
+		let res = self.sess.execute(&stmt!(&format!(
+			"SELECT channels FROM {}.groups WHERE id = {};",
+			self.kspc, gid.0
+		))).wait().unwrap();
+		let row = res.first_row().unwrap();
+		let mut channels: SetIterator = row.get(0).unwrap();
+		let cid: i64  = channels.next().unwrap().get_i64().unwrap();		
+		self.sess.execute(&stmt!(&format!(
+			"UPDATE {}.channels SET members = members + {{{}}} WHERE id = {};",
+			self.kspc, uid.0, cid
+		))).wait().unwrap();
+		self.sess.execute(&stmt!(&format!(
+			"UPDATE {}.user_groups SET groups = groups + {{{}}} WHERE id = {};",
+			self.kspc, gid.0, uid.0
+		))).wait().unwrap();
 		Success
 	}
 
@@ -486,7 +500,7 @@ impl Api {
 		} else if let Err(_) = self.validate_id("users", uid.0) {
 			return NotFound(PlainText("User not found".to_string()))
 		}
-		self.__remove_group_member(gid.0, uid.0).await;
+		self.__remove_group_member(gid.0, uid.0);
 		Success
 	}
 
@@ -584,7 +598,7 @@ impl Api {
 		use ChannelResponse::*;
 		let res = self.sess.execute(&stmt!(&format!(
 			"SELECT name, group, members FROM {}.channels WHERE id={};", self.kspc, id.0
-		))).wait().unwrap();		
+		))).wait().unwrap();
 		let (name, group, members): (String, i64, SetIterator) = match res.row_count() {
 			1 => {
 				let row = res.first_row().unwrap();
@@ -593,7 +607,6 @@ impl Api {
 			0 => return NotFound,
 			_ => return InternalError(PlainText(UNUSUAL_ROW_ERROR.to_string()))
 		};
-
 		Success(Json(Channel {
 			id: id.0,
 			name,
@@ -605,13 +618,49 @@ impl Api {
 	#[oai(path = "/channel", method = "delete")]
 	/// Deletes a channel
 	async fn delete_channel(&self, auth: Authorization, id: Query<i64>) -> DeleteResponse {
-		todo!()
+		use DeleteResponse::*;
+		if let Err(_) = self.validate_id("channels", id.0) {
+			NotFound(PlainText("Channel not found.".to_string()))
+		} else {
+			let res = self.sess.execute(&stmt!(&format!(
+				"SELECT group FROM {}.channels WHERE id={};", self.kspc, id.0
+			))).wait().unwrap();
+			let row = res.first_row().unwrap();
+			let group: i64 = row.get(0).unwrap();
+			self.sess.execute(&stmt!(&format!(
+				"UPDATE {}.groups SET channels = channels - {{{}}} WHERE id = {};",
+				self.kspc, id.0, group
+			))).wait().unwrap();
+			self.sess.execute(&stmt!(&format!(
+				"DELETE FROM {}.channels WHERE id = {};",
+				self.kspc, id.0
+			))).wait().unwrap();
+			Success
+		}
 	}
 
 	#[oai(path = "/channel/members", method = "get")]
 	/// Gets the members that can access a channel
 	async fn get_channel_members(&self, auth: Authorization, id: Query<i64>) -> MembersResponse {
-		todo!()
+		use MembersResponse::*;
+		let res = self.sess.execute(&stmt!(&format!(
+			"SELECT members FROM {}.channels WHERE id={};", self.kspc, id.0
+		))).wait().unwrap();
+		let row = res.first_row().unwrap();
+		let members: SetIterator = row.get(0).unwrap();
+		let members_objs = members.map(|_| {
+			let res = self.sess.execute(&stmt!(&format!(
+				"SELECT id, name, email FROM {}.users WHERE id={};",
+				self.kspc, id.0
+			))).wait().unwrap();
+			let row = res.first_row().unwrap();
+			User {
+				id: id.0,
+				username: row.get(1).unwrap(),
+				email: row.get(2).unwrap(),
+			}
+		}).collect::<Vec<User>>();
+		Success(Json(members_objs))
 	}
 
 	#[oai(path = "/channel/members", method = "put")]
@@ -622,7 +671,16 @@ impl Api {
 		id: Query<i64>,
 		uid: Query<i64>,
 	) -> GenericResponse {
-		todo!()
+		use GenericResponse::*;
+		if let Err(_) = self.validate_id("channels", id.0) {
+			return NotFound(PlainText("Channel not found".to_string()))
+		} else if let Err(_) = self.validate_id("users", uid.0) {
+			return NotFound(PlainText("User not found".to_string()))
+		}
+		self.sess.execute(&stmt!(&format!(
+			"UPDATE {}.channels SET members = members + {{{}}} WHERE id={};", self.kspc, uid.0, id.0
+		))).wait().unwrap();
+		Success
 	}
 
 	#[oai(path = "/channel/members", method = "delete")]
@@ -639,12 +697,12 @@ impl Api {
 		} else if let Err(_) = self.validate_id("users", uid.0) {
 			return NotFound(PlainText("User not found".to_string()))
 		}
-		self.__remove_channel_member(cid.0, uid.0).await;
+		self.__remove_channel_member(cid.0, uid.0);
 		Success
 	}
 
 	#[oai(path = "/channel/message", method = "get")]
-	/// Returns batch of messages in channel containing "term" starting at offset
+	/// Returns batch of messages in channel containing "term" in the last 100 messages
 	async fn search_channel(
 		&self,
 		auth: Authorization,
@@ -652,7 +710,26 @@ impl Api {
 		term: Query<String>,
 		off: Query<u64>,
 	) -> MessagesResponse {
-		todo!()
+		use MessagesResponse::*;
+		if let Err(_) = self.validate_id("channels", cid.0) {
+			return NotFound(PlainText("Channel not found".to_string()))
+		}
+		let res = self.sess.execute(&stmt!(&format!(
+			"SELECT * FROM {}.messages WHERE channel={} LIMIT 100;",
+			self.kspc, cid.0
+		))).wait().unwrap();
+		let messages = res.iter().filter(|row| {
+			let content: String = row.get(4).unwrap();
+			content.contains(&term.0)
+		}).map(|row| {
+			Message {
+				id: row.get(0).unwrap(),
+				author: row.get(2).unwrap(),
+				channel: row.get(1).unwrap(),
+				content: row.get(4).unwrap()
+			}
+		}).collect::<Vec<Message>>();
+		Success(Json(messages))
 	}
 
 	#[oai(path = "/channel/messages", method = "get")]
@@ -665,7 +742,23 @@ impl Api {
 		cid: Query<i64>,
 		num_msgs: Query<u64>,
 	) -> MessagesResponse {
-		todo!()
+		use MessagesResponse::*;
+		if let Err(_) = self.validate_id("channels", cid.0) {
+			return NotFound(PlainText("Channel not found".to_string()))
+		}
+		let res = self.sess.execute(&stmt!(&format!(
+			"SELECT * FROM {}.messages WHERE channel={} LIMIT {};",
+			self.kspc, cid.0, num_msgs.0, 
+		))).wait().unwrap();
+		let messages = res.iter().map(|row| {
+			Message {
+				id: row.get(0).unwrap(),
+				author: row.get(2).unwrap(),
+				channel: row.get(1).unwrap(),
+				content: row.get(4).unwrap()
+			}
+		}).collect::<Vec<Message>>();
+		Success(Json(messages))	
 	}
 }
 
@@ -698,7 +791,7 @@ async fn main() -> Result<(), std::io::Error> {
 		.nest("/", ui)
 		.data(ServerKey::new_from_slice(&key.as_bytes()).unwrap());
 	// let cli = poem::test::TestClient::new(app);
-	// let resp = cli.post("/api/login?id=234").body("abc").send().await;
+	// let resp = cli.post("/api/login?id=234").body("abc").send();
 	// resp.assert_status_is_ok();
 	// Ok(())
 	Server::new(TcpListener::bind("127.0.0.1:3000"))
