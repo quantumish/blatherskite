@@ -1,5 +1,9 @@
 # blatherskite
- 
+> blath·er·skite ⬩ 
+> /ˈblaT͟Hərˌskīt/
+>    - a person who talks at great length without making much sense.
+>    - foolish talk; nonsense.
+
 # Dependencies
 You'll need to install CassandraDB for this: you can do that by running:
 ```
