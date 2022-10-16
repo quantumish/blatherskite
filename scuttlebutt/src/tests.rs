@@ -5,7 +5,7 @@ use more_asserts::*;
 use poem::{
     http::StatusCode,
     middleware::AddDataEndpoint,
-    test::{TestClient, TestRequestBuilder, TestResponse},
+    test::TestClient,
     Route,
 };
 use pretty_assertions::assert_eq;
@@ -13,13 +13,18 @@ use sha2::Digest;
 
 type FakeClient = TestClient<AddDataEndpoint<Route, ServerKey>>;
 
+fn contents_eq<T: PartialEq>(a: Vec<T>, b: Vec<T>) -> bool {
+	b.iter().all(|item| a.contains(item))
+}
+
 fn setup() -> FakeClient {
     let key: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(7)
         .map(char::from)
         .collect();
-    let api_service = OpenApiService::new(Api::new("test"), "Scuttlebutt", "1.0").server("http://localhost:3000/api");
+	let db = Box::new(Cassandra::new("test"));
+    let api_service = OpenApiService::new(Api::new(db), "Scuttlebutt", "1.0").server("http://localhost:3000/api");
     let app = Route::new()
         .nest("/api", api_service)
         .data(ServerKey::new_from_slice(&key.as_bytes()).unwrap());
@@ -31,14 +36,6 @@ fn hash_pass(pass: &str) -> String {
     hasher.update(pass);
     hex::encode(hasher.finalize())
 }
-
-enum HttpMethod {
-    Post(String),
-    Get(String),
-    Delete(String),
-    Put(String),
-}
-use crate::tests::HttpMethod::*;
 
 async fn make_user(cli: &FakeClient, name: &str, email: &str, pass: &str) -> User {
     let hash = hash_pass(pass);
@@ -70,15 +67,23 @@ async fn setup_user_auth() -> (FakeClient, User, String) {
 /// FIXME non exhaustive
 async fn post_user() {
     let cli = setup();
-    let resp = make_user(&cli, "test", "test@example.com", "12345").await;
+    let user = make_user(&cli, "test", "test@example.com", "12345").await;
+	
+    assert_eq!(user.email, "test@example.com");
+    assert_eq!(user.username, "test"); 
 
     // TODO questionable
-    let mut id_gen = Snowflake::default();
-    assert_ge!(id_gen.generate(), resp.id);
+    // let mut id_gen = Snowflake::default();
+    // assert_ge!(id_gen.generate(), resp.id);
 
-    assert_eq!(resp.email, "test@example.com");
-    assert_eq!(resp.username, "test");
+	let resp = cli.get(format!("/api/user?id={}", user.id)).send().await;
+	resp.assert_status_is_ok();
+	
+	let same_user = resp.json().await.value().deserialize::<User>();
+	assert_eq!(user, same_user);
 }
+
+	
 
 #[tokio::test]
 async fn post_login() {
@@ -122,15 +127,16 @@ async fn get_user() {
 #[tokio::test]
 async fn put_user() {
     let (cli, user, auth) = setup_user_auth().await;
-
+	
     let resp = cli.put("/api/user?name=fred&email=whoo@whee.com").send().await;
     resp.assert_status(StatusCode::UNAUTHORIZED);
-    let resp = cli
-        .put("/api/user?name=fred&email=whoo@whee.com")
-        .header::<&str, String>("ScuttleKey", auth)
-        .send()
-        .await;
+	
+    let resp = cli.put("/api/user?name=fred&email=whoo@whee.com")
+        .header::<&str, String>("ScuttleKey", auth).send().await;
     resp.assert_status_is_ok();
+	
+	let resp = cli.get(format!("/api/user?id={}", user.id)).send().await;
+	resp.assert_status_is_ok();
     let ret_user = resp.json().await.value().deserialize::<User>();
     assert_eq!(ret_user.email, "whoo@whee.com");
     assert_eq!(ret_user.username, "fred");
@@ -145,50 +151,45 @@ async fn del_user() {
     let resp = cli.delete(format!("/api/user?id={}", user.id)).send().await;
     resp.assert_status(StatusCode::UNAUTHORIZED);
 
-    let resp = cli
-        .delete(format!("/api/user?id={}", user.id))
-        .header::<&str, String>("ScuttleKey", auth)
-        .send()
-        .await;
+    let resp = cli.delete(format!("/api/user?id={}", user.id))
+        .header::<&str, String>("ScuttleKey", auth).send().await;
+	
     resp.assert_status_is_ok();
     let resp = cli.get(format!("/api/user?id={}", user.id)).send().await;
     resp.assert_status(StatusCode::NOT_FOUND);
 }
 
-async fn make_group(cli: &FakeClient, auth: String, name: &str) -> Group {
-    let resp = cli
-        .post(format!("/api/group?name={}", name))
-        .header::<&str, String>("ScuttleKey", auth)
-        .send()
-        .await;
+async fn make_group(cli: &FakeClient, auth: &str, name: &str) -> Group {
+    let resp = cli.post(format!("/api/group?name={}", name))
+		.header::<&str, &str>("ScuttleKey", auth).send().await;
     resp.assert_status_is_ok();
     resp.json().await.value().deserialize::<Group>()
 }
 
-async fn make_channel(cli: &FakeClient, auth: String, gid: i64, name: &str) -> Channel {
+async fn make_channel(cli: &FakeClient, auth: &str, gid: i64, name: &str) -> Channel {
     let resp = cli
         .post(format!("/api/group/channels?gid={}&name={}", gid, name))
-        .header::<&str, String>("ScuttleKey", auth)
+        .header::<&str, &str>("ScuttleKey", auth)
         .send()
         .await;
     resp.assert_status_is_ok();
     resp.json().await.value().deserialize::<Channel>()
 }
 
-async fn find_channel(cli: &FakeClient, auth: String, id: i64) -> Channel {
+async fn find_channel(cli: &FakeClient, auth: &str, id: i64) -> Channel {
     let resp = cli
         .get(format!("/api/channel?id={}", id))
-        .header::<&str, String>("ScuttleKey", auth)
+        .header::<&str, &str>("ScuttleKey", auth)
         .send()
         .await;
     resp.assert_status_is_ok();
     resp.json().await.value().deserialize::<Channel>()
 }
 
-async fn find_group(cli: &FakeClient, auth: String, id: i64) -> Group {
+async fn find_group(cli: &FakeClient, auth: &str, id: i64) -> Group {
     let resp = cli
         .get(format!("/api/group?id={}", id))
-        .header::<&str, String>("ScuttleKey", auth)
+        .header::<&str, &str>("ScuttleKey", auth)
         .send()
         .await;
     resp.assert_status_is_ok();
@@ -199,12 +200,12 @@ async fn find_group(cli: &FakeClient, auth: String, id: i64) -> Group {
 async fn post_group() {
     let (cli, user, auth) = setup_user_auth().await;	
     let resp = cli.post("/api/group?name=")
-        .header::<&str, String>("ScuttleKey", auth.clone()).send().await;
+        .header::<&str, &str>("ScuttleKey", &auth).send().await;
     resp.assert_status(StatusCode::BAD_REQUEST);	
 	
     let resp = cli
         .post("/api/group?name=test")
-        .header::<&str, String>("ScuttleKey", auth.clone())
+        .header::<&str, &str>("ScuttleKey", &auth)
         .send()
         .await;
     resp.assert_status_is_ok();
@@ -213,7 +214,7 @@ async fn post_group() {
     assert_eq!(group.members, vec![user.id]);
     assert_eq!(group.channels.len(), 1);
     assert_eq!(
-        find_channel(&cli, auth, group.channels[0]).await.name,
+        find_channel(&cli, &auth, group.channels[0]).await.name,
         String::from("main")
     );
 }
@@ -221,67 +222,64 @@ async fn post_group() {
 #[tokio::test]
 async fn put_group() {
     let (cli, user, auth) = setup_user_auth().await;
-    let group = make_group(&cli, auth.clone(), "test").await;
+    let group = make_group(&cli, &auth, "test").await;
 
     let resp = cli.put(format!("/api/group?id={}&name=test2", group.id)).send().await;
     resp.assert_status(StatusCode::UNAUTHORIZED);
 
     let resp = cli
         .put(format!("/api/group?id={}&name=", group.id))
-        .header::<&str, String>("ScuttleKey", auth.clone())
+        .header::<&str, &str>("ScuttleKey", &auth)
         .send()
         .await;
     resp.assert_status(StatusCode::BAD_REQUEST);
 
     let resp = cli
         .put("/api/group?id=12&name=test2")
-        .header::<&str, String>("ScuttleKey", auth.clone())
+        .header::<&str, &str>("ScuttleKey", &auth)
         .send()
         .await;
     resp.assert_status(StatusCode::NOT_FOUND);
 
-    let resp = cli
-        .put(format!("/api/group?id={}&name=test2", group.id))
-        .header::<&str, String>("ScuttleKey", auth)
-        .send()
-        .await;
+    let resp = cli.put(format!("/api/group?id={}&name=test2", group.id))
+        .header::<&str, String>("ScuttleKey", auth).send().await;
     resp.assert_status_is_ok();
 }
 
 #[tokio::test]
 async fn del_group() {
     let (cli, user, auth) = setup_user_auth().await;
-    let group = make_group(&cli, auth.clone(), "test").await;
+    let group = make_group(&cli, &auth, "test").await;
 
     let resp = cli.delete(format!("/api/group?id={}", group.id)).send().await;
     resp.assert_status(StatusCode::UNAUTHORIZED);
 
-    let resp = cli
-        .delete("/api/group?id=12")
-        .header::<&str, String>("ScuttleKey", auth.clone())
-        .send()
-        .await;
+    let resp = cli.delete("/api/group?id=12")
+        .header::<&str, &str>("ScuttleKey", &auth).send().await;
     resp.assert_status(StatusCode::NOT_FOUND);
 
-    let resp = cli
-        .delete(format!("/api/group?id={}", group.id))
-        .header::<&str, String>("ScuttleKey", auth.clone())
-        .send()
-        .await;
+    let resp = cli.delete(format!("/api/group?id={}", group.id))
+        .header::<&str, &str>("ScuttleKey", &auth).send().await;
     resp.assert_status_is_ok();
 
-    let resp = cli
-        .get(format!("/api/group?id={}", group.id))
-        .header::<&str, String>("ScuttleKey", auth)
-        .send()
-        .await;
+    let resp = cli.get(format!("/api/group?id={}", group.id))
+        .header::<&str, &str>("ScuttleKey", &auth).send().await;	
+	
+    resp.assert_status(StatusCode::NOT_FOUND);
+	let resp = cli.get(format!("/api/channel?id={}", group.channels[0]))
+        .header::<&str, &str>("ScuttleKey", &auth).send().await;
+    resp.assert_status(StatusCode::NOT_FOUND);
+	
+	let resp = cli.get("/api/user/groups")
+        .header::<&str, String>("ScuttleKey", auth).send().await;
+	
     resp.assert_status(StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
 async fn put_group_members() {
     let (cli, user, auth) = setup_user_auth().await;
-    let group = make_group(&cli, auth.clone(), "test").await;
+    let group = make_group(&cli, &auth, "test").await;
     let user2 = make_user(&cli, "testeroo", "test2@example.com", "123456").await;
     let user3 = make_user(&cli, "testeroo", "test2@example.com", "123456").await;
 
@@ -293,34 +291,34 @@ async fn put_group_members() {
 
     let resp = cli
         .put("/api/group/members?gid=12&uid=32")
-        .header::<&str, String>("ScuttleKey", auth.clone())
+        .header::<&str, &str>("ScuttleKey", &auth)
         .send()
         .await;
     resp.assert_status(StatusCode::NOT_FOUND);
 
     let resp = cli
         .put(format!("/api/group/members?gid={}&uid={}", group.id, user2.id))
-        .header::<&str, String>("ScuttleKey", auth.clone())
+        .header::<&str, &str>("ScuttleKey", &auth)
         .send()
         .await;
     resp.assert_status_is_ok();
     let resp = cli
         .put(format!("/api/group/members?gid={}&uid={}", group.id, user3.id))
-        .header::<&str, String>("ScuttleKey", auth.clone())
+        .header::<&str, &str>("ScuttleKey", &auth)
         .send()
         .await;
     resp.assert_status_is_ok();
 
-    let new_group = find_group(&cli, auth, group.id).await;
-    assert_eq!(new_group.members, vec![user.id, user2.id, user3.id]);
+    let new_group = find_group(&cli, &auth, group.id).await;
+    assert!(contents_eq(new_group.members, vec![user.id, user2.id, user3.id]));
 }
 
 #[tokio::test]
 async fn post_group_channels() {
     let (cli, user, auth) = setup_user_auth().await;
-    let group = make_group(&cli, auth.clone(), "test").await;
+    let group = make_group(&cli, &auth, "test").await;
 
-    let resp = cli
+   let resp = cli
         .post(format!("/api/group/channels?gid={}&name=test", group.id))
         .send()
         .await;
@@ -328,34 +326,35 @@ async fn post_group_channels() {
 
     let resp = cli
         .post(format!("/api/group/channels?gid={}&name=", group.id))
-        .header::<&str, String>("ScuttleKey", auth.clone())
+        .header::<&str, &str>("ScuttleKey", &auth)
         .send()
         .await;
     resp.assert_status(StatusCode::BAD_REQUEST);
 
     let resp = cli
         .post("/api/group/channels?gid=12&name=test")
-        .header::<&str, String>("ScuttleKey", auth.clone())
+        .header::<&str, &str>("ScuttleKey", &auth)
         .send()
         .await;
     resp.assert_status(StatusCode::NOT_FOUND);
 
     let resp = cli
         .post(format!("/api/group/channels?gid={}&name=test", group.id))
-        .header::<&str, String>("ScuttleKey", auth.clone())
+        .header::<&str, &str>("ScuttleKey", &auth)
         .send()
         .await;
     resp.assert_status_is_ok();
     let channel = resp.json().await.value().deserialize::<Channel>();
     assert_eq!(channel.name, "test");
     assert_eq!(channel.members, vec![user.id]);
-    assert!(find_group(&cli, auth, group.id).await.channels.contains(&channel.id));
+    assert!(find_group(&cli, &auth, group.id).await.channels.contains(&channel.id));
 }
 #[test]
 /// Test if gen_id() gives unique IDs on successive calls
 /// and if it can be called from multiple threads without error
 fn test_id_gen() {
     let a = gen_id();
+	std::thread::sleep(std::time::Duration::from_secs(1));
     let b = gen_id();
     assert_ge!(b, a);
     let threads: Vec<_> = (0..100).map(|i| std::thread::spawn(move || gen_id())).collect();
@@ -366,14 +365,11 @@ fn test_id_gen() {
 
 #[tokio::test]
 async fn get_channel() {
-    let (cli, user, auth) = setup_user_auth().await;
-    let group = make_group(&cli, auth.clone(), "test").await;
-    let chan = make_channel(&cli, auth.clone(), group.id, "random").await;
-    let resp = cli
-        .get(format!("/api/channel?id={}", chan.id))
-        .header::<&str, String>("ScuttleKey", auth)
-        .send()
-        .await;
+    let (cli, _user, auth) = setup_user_auth().await;
+    let group = make_group(&cli, &auth, "test").await;
+    let chan = make_channel(&cli, &auth, group.id, "random").await;
+    let resp = cli.get(format!("/api/channel?id={}", chan.id))
+        .header::<&str, &str>("ScuttleKey", &auth).send().await;
     resp.assert_status_is_ok();
     let recv_chan = resp.json().await.value().deserialize::<Channel>();
     assert_eq!(chan, recv_chan);
@@ -382,22 +378,32 @@ async fn get_channel() {
 // FIXME non exhaustive
 #[tokio::test]
 async fn get_channels() {
-    let (cli, user, auth) = setup_user_auth().await;
-    let group = make_group(&cli, auth.clone(), "test").await;
-    let chan1 = make_channel(&cli, auth.clone(), group.id, "random").await;
-    let chan2 = make_channel(&cli, auth.clone(), group.id, "random").await;
-    let chan3 = make_channel(&cli, auth.clone(), group.id, "random").await;
-    let resp = cli
-        .get(format!("/api/group/channels?gid={}", group.id))
-        .header::<&str, String>("ScuttleKey", auth.clone())
-        .send()
-        .await;
+    let (cli, _user, auth) = setup_user_auth().await;
+    let group = make_group(&cli, &auth, "test").await;
+    let chan1 = make_channel(&cli, &auth, group.id, "random").await;
+    let chan2 = make_channel(&cli, &auth, group.id, "random").await;
+    let chan3 = make_channel(&cli, &auth, group.id, "random").await;
+    let resp = cli.get(format!("/api/group/channels?gid={}", group.id))
+        .header::<&str, &str>("ScuttleKey", &auth).send().await;
     resp.assert_status_is_ok();
     let channels = resp.json().await.value().deserialize::<Vec<Channel>>();
-    assert_eq!(
+    assert!(contents_eq(
         channels,
-        vec![find_channel(&cli, auth, group.channels[0]).await, chan1, chan2, chan3]
-    );
+        vec![find_channel(&cli, &auth, group.channels[0]).await, chan1, chan2, chan3]
+    ));
+}
+
+#[tokio::test]
+async fn get_groups() {
+	let (cli, _user, auth) = setup_user_auth().await;
+	let group = make_group(&cli, &auth, "test1").await;
+	let group2 = make_group(&cli, &auth, "test2").await;
+	let group3 = make_group(&cli, &auth, "test3").await;	
+	let resp = cli.get("/api/user/groups")
+        .header::<&str, &str>("ScuttleKey", &auth).send().await;
+    resp.assert_status_is_ok();
+    let groups = resp.json().await.value().deserialize::<Vec<Group>>();
+	assert!(contents_eq(groups, vec![group, group2, group3]));    
 }
 
 // #[tokio::test]
