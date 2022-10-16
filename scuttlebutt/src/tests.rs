@@ -60,6 +60,7 @@ async fn setup_user_auth() -> (FakeClient, User, String) {
     let cli = setup();
     let user = make_user(&cli, "test", "test@example.com", "12345").await;
     let auth = login(&cli, user.id, "12345").await;
+	let cli = cli.default_header("Authorization", &auth);
     (cli, user, auth)
 }
 
@@ -100,6 +101,7 @@ async fn post_login() {
     resp.assert_status(StatusCode::NOT_FOUND);
 
     let resp = cli.post(format!("/api/login?id={}", user.id))
+		.header::<&str, &str>("Authorization", "")
 		.content_type("text/plain").body(hash_pass("123")).send().await;
     resp.assert_status(StatusCode::UNAUTHORIZED);
 
@@ -128,11 +130,11 @@ async fn get_user() {
 async fn put_user() {
     let (cli, user, auth) = setup_user_auth().await;
 	
-    let resp = cli.put("/api/user?name=fred&email=whoo@whee.com").send().await;
+    let resp = cli.put("/api/user?name=fred&email=whoo@whee.com")
+		.header::<&str, &str>("Authorization", "").send().await;
     resp.assert_status(StatusCode::UNAUTHORIZED);
 	
-    let resp = cli.put("/api/user?name=fred&email=whoo@whee.com")
-        .header::<&str, String>("ScuttleKey", auth).send().await;
+    let resp = cli.put("/api/user?name=fred&email=whoo@whee.com").send().await;
     resp.assert_status_is_ok();
 	
 	let resp = cli.get(format!("/api/user?id={}", user.id)).send().await;
@@ -148,11 +150,11 @@ async fn put_user() {
 async fn del_user() {
     let (cli, user, auth) = setup_user_auth().await;
 
-    let resp = cli.delete(format!("/api/user?id={}", user.id)).send().await;
+    let resp = cli.delete(format!("/api/user?id={}", user.id))
+		.header::<&str, &str>("Authorization", "").send().await;
     resp.assert_status(StatusCode::UNAUTHORIZED);
 
-    let resp = cli.delete(format!("/api/user?id={}", user.id))
-        .header::<&str, String>("ScuttleKey", auth).send().await;
+    let resp = cli.delete(format!("/api/user?id={}", user.id)).send().await;
 	
     resp.assert_status_is_ok();
     let resp = cli.get(format!("/api/user?id={}", user.id)).send().await;
@@ -161,7 +163,7 @@ async fn del_user() {
 
 async fn make_group(cli: &FakeClient, auth: &str, name: &str) -> Group {
     let resp = cli.post(format!("/api/group?name={}", name))
-		.header::<&str, &str>("ScuttleKey", auth).send().await;
+		.send().await;
     resp.assert_status_is_ok();
     resp.json().await.value().deserialize::<Group>()
 }
@@ -169,7 +171,7 @@ async fn make_group(cli: &FakeClient, auth: &str, name: &str) -> Group {
 async fn make_channel(cli: &FakeClient, auth: &str, gid: i64, name: &str) -> Channel {
     let resp = cli
         .post(format!("/api/group/channels?gid={}&name={}", gid, name))
-        .header::<&str, &str>("ScuttleKey", auth)
+        
         .send()
         .await;
     resp.assert_status_is_ok();
@@ -179,7 +181,7 @@ async fn make_channel(cli: &FakeClient, auth: &str, gid: i64, name: &str) -> Cha
 async fn find_channel(cli: &FakeClient, auth: &str, id: i64) -> Channel {
     let resp = cli
         .get(format!("/api/channel?id={}", id))
-        .header::<&str, &str>("ScuttleKey", auth)
+        
         .send()
         .await;
     resp.assert_status_is_ok();
@@ -189,7 +191,7 @@ async fn find_channel(cli: &FakeClient, auth: &str, id: i64) -> Channel {
 async fn find_group(cli: &FakeClient, auth: &str, id: i64) -> Group {
     let resp = cli
         .get(format!("/api/group?id={}", id))
-        .header::<&str, &str>("ScuttleKey", auth)
+        
         .send()
         .await;
     resp.assert_status_is_ok();
@@ -200,12 +202,12 @@ async fn find_group(cli: &FakeClient, auth: &str, id: i64) -> Group {
 async fn post_group() {
     let (cli, user, auth) = setup_user_auth().await;	
     let resp = cli.post("/api/group?name=")
-        .header::<&str, &str>("ScuttleKey", &auth).send().await;
+        .send().await;
     resp.assert_status(StatusCode::BAD_REQUEST);	
 	
     let resp = cli
         .post("/api/group?name=test")
-        .header::<&str, &str>("ScuttleKey", &auth)
+        
         .send()
         .await;
     resp.assert_status_is_ok();
@@ -224,25 +226,24 @@ async fn put_group() {
     let (cli, user, auth) = setup_user_auth().await;
     let group = make_group(&cli, &auth, "test").await;
 
-    let resp = cli.put(format!("/api/group?id={}&name=test2", group.id)).send().await;
+    let resp = cli.put(format!("/api/group?id={}&name=test2", group.id))
+		.header::<&str, &str>("Authorization", "").send().await;
     resp.assert_status(StatusCode::UNAUTHORIZED);
 
     let resp = cli
-        .put(format!("/api/group?id={}&name=", group.id))
-        .header::<&str, &str>("ScuttleKey", &auth)
+        .put(format!("/api/group?id={}&name=", group.id))        
         .send()
         .await;
     resp.assert_status(StatusCode::BAD_REQUEST);
 
     let resp = cli
         .put("/api/group?id=12&name=test2")
-        .header::<&str, &str>("ScuttleKey", &auth)
+        
         .send()
         .await;
     resp.assert_status(StatusCode::NOT_FOUND);
 
-    let resp = cli.put(format!("/api/group?id={}&name=test2", group.id))
-        .header::<&str, String>("ScuttleKey", auth).send().await;
+    let resp = cli.put(format!("/api/group?id={}&name=test2", group.id)).send().await;
     resp.assert_status_is_ok();
 }
 
@@ -251,27 +252,27 @@ async fn del_group() {
     let (cli, user, auth) = setup_user_auth().await;
     let group = make_group(&cli, &auth, "test").await;
 
-    let resp = cli.delete(format!("/api/group?id={}", group.id)).send().await;
+    let resp = cli.delete(format!("/api/group?id={}", group.id))
+		.header::<&str, &str>("Authorization", "").send().await;
     resp.assert_status(StatusCode::UNAUTHORIZED);
 
     let resp = cli.delete("/api/group?id=12")
-        .header::<&str, &str>("ScuttleKey", &auth).send().await;
+        .send().await;
     resp.assert_status(StatusCode::NOT_FOUND);
 
     let resp = cli.delete(format!("/api/group?id={}", group.id))
-        .header::<&str, &str>("ScuttleKey", &auth).send().await;
+        .send().await;
     resp.assert_status_is_ok();
 
     let resp = cli.get(format!("/api/group?id={}", group.id))
-        .header::<&str, &str>("ScuttleKey", &auth).send().await;	
+        .send().await;	
 	
     resp.assert_status(StatusCode::NOT_FOUND);
 	let resp = cli.get(format!("/api/channel?id={}", group.channels[0]))
-        .header::<&str, &str>("ScuttleKey", &auth).send().await;
+        .send().await;
     resp.assert_status(StatusCode::NOT_FOUND);
 	
-	let resp = cli.get("/api/user/groups")
-        .header::<&str, String>("ScuttleKey", auth).send().await;
+	let resp = cli.get("/api/user/groups").send().await;
 	
     resp.assert_status(StatusCode::NOT_FOUND);
 }
@@ -285,62 +286,25 @@ async fn put_group_members() {
 
     let resp = cli
         .put(format!("/api/group/members?gid={}&uid={}", group.id, user2.id))
+        .header::<&str, &str>("Authorization", "")
         .send()
         .await;
     resp.assert_status(StatusCode::UNAUTHORIZED);
 
     let resp = cli
-        .put("/api/group/members?gid=12&uid=32")
-        .header::<&str, &str>("ScuttleKey", &auth)
-        .send()
-        .await;
-    resp.assert_status(StatusCode::NOT_FOUND);
-
-    let resp = cli
-        .put(format!("/api/group/members?gid={}&uid={}", group.id, user2.id))
-        .header::<&str, &str>("ScuttleKey", &auth)
-        .send()
-        .await;
-    resp.assert_status_is_ok();
-    let resp = cli
-        .put(format!("/api/group/members?gid={}&uid={}", group.id, user3.id))
-        .header::<&str, &str>("ScuttleKey", &auth)
-        .send()
-        .await;
-    resp.assert_status_is_ok();
-
-    let new_group = find_group(&cli, &auth, group.id).await;
-    assert!(contents_eq(new_group.members, vec![user.id, user2.id, user3.id]));
-}
-
-#[tokio::test]
-async fn post_group_channels() {
-    let (cli, user, auth) = setup_user_auth().await;
-    let group = make_group(&cli, &auth, "test").await;
-
-   let resp = cli
-        .post(format!("/api/group/channels?gid={}&name=test", group.id))
-        .send()
-        .await;
-    resp.assert_status(StatusCode::UNAUTHORIZED);
-
-    let resp = cli
-        .post(format!("/api/group/channels?gid={}&name=", group.id))
-        .header::<&str, &str>("ScuttleKey", &auth)
+        .post(format!("/api/group/channels?gid={}&name=", group.id))       
         .send()
         .await;
     resp.assert_status(StatusCode::BAD_REQUEST);
 
     let resp = cli
         .post("/api/group/channels?gid=12&name=test")
-        .header::<&str, &str>("ScuttleKey", &auth)
         .send()
         .await;
     resp.assert_status(StatusCode::NOT_FOUND);
 
     let resp = cli
-        .post(format!("/api/group/channels?gid={}&name=test", group.id))
-        .header::<&str, &str>("ScuttleKey", &auth)
+        .post(format!("/api/group/channels?gid={}&name=test", group.id))        
         .send()
         .await;
     resp.assert_status_is_ok();
@@ -368,8 +332,7 @@ async fn get_channel() {
     let (cli, _user, auth) = setup_user_auth().await;
     let group = make_group(&cli, &auth, "test").await;
     let chan = make_channel(&cli, &auth, group.id, "random").await;
-    let resp = cli.get(format!("/api/channel?id={}", chan.id))
-        .header::<&str, &str>("ScuttleKey", &auth).send().await;
+    let resp = cli.get(format!("/api/channel?id={}", chan.id)).send().await;
     resp.assert_status_is_ok();
     let recv_chan = resp.json().await.value().deserialize::<Channel>();
     assert_eq!(chan, recv_chan);
@@ -383,8 +346,7 @@ async fn get_channels() {
     let chan1 = make_channel(&cli, &auth, group.id, "random").await;
     let chan2 = make_channel(&cli, &auth, group.id, "random").await;
     let chan3 = make_channel(&cli, &auth, group.id, "random").await;
-    let resp = cli.get(format!("/api/group/channels?gid={}", group.id))
-        .header::<&str, &str>("ScuttleKey", &auth).send().await;
+    let resp = cli.get(format!("/api/group/channels?gid={}", group.id)).send().await;
     resp.assert_status_is_ok();
     let channels = resp.json().await.value().deserialize::<Vec<Channel>>();
     assert!(contents_eq(
@@ -399,8 +361,7 @@ async fn get_groups() {
 	let group = make_group(&cli, &auth, "test1").await;
 	let group2 = make_group(&cli, &auth, "test2").await;
 	let group3 = make_group(&cli, &auth, "test3").await;	
-	let resp = cli.get("/api/user/groups")
-        .header::<&str, &str>("ScuttleKey", &auth).send().await;
+	let resp = cli.get("/api/user/groups").send().await;
     resp.assert_status_is_ok();
     let groups = resp.json().await.value().deserialize::<Vec<Group>>();
 	assert!(contents_eq(groups, vec![group, group2, group3]));    

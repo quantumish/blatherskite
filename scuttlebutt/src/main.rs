@@ -34,7 +34,7 @@ struct Claims {
 #[derive(SecurityScheme)]
 #[oai(
 	type = "api_key",
-	key_name = "ScuttleKey",
+	key_name = "Authorization",
 	in = "header",
 	checker = "api_checker"
 )]
