@@ -40,6 +40,17 @@ struct Claims {
 )]
 struct Authorization(Claims);
 
+struct IdGenerator(Snowflake);
+
+impl Clone for IdGenerator {
+	fn clone(&self) -> Self {
+		println!("Cloning from thread {:?}", std::thread::current().id());
+		let now = Utc::now().timestamp_nanos();
+		// TODO generalize hardcoded numbers
+		IdGenerator(Snowflake::new(now, 1, 0))
+	}
+}
+
 async fn api_checker(req: &Request, api_key: ApiKey) -> Option<Claims> {
 	let claims: Claims = serde_json::from_str(
 		&String::from_utf8(base64::decode(api_key.key.split(".").nth(1).unwrap()).unwrap())
@@ -122,12 +133,12 @@ impl Api {
 
 	#[oai(path = "/user", method = "post")]
 	/// Creates a new user
-	async fn make_user(&self, name: Query<String>, email: Query<String>, hash: Query<String>) -> CreateUserResponse {
+	async fn make_user(&self, idgen: Data<&IdGenerator>, name: Query<String>, email: Query<String>, hash: Query<String>) -> CreateUserResponse {		
 		use CreateUserResponse::*;
 		if hash.0.len() != 64 {
 			return BadRequest(PlainText("Invalid hash provided.".to_string()));
 		}
-		let id = gen_id();
+		let id = (*idgen.0).0.generate();
 		self.db.create_user(id, name.0.clone(), email.0.clone(), hash.0).unwrap();
 		Success(Json(User {
 			id,
@@ -433,6 +444,7 @@ async fn main() -> Result<(), std::io::Error> {
 	let app = Route::new()
 		.nest("/api", api_service)
 		.nest("/", ui)
+		.data(IdGenerator(Snowflake::default()))
 		.data(ServerKey::new_from_slice(&key.as_bytes()).unwrap());
 
 	Server::new(TcpListener::bind("127.0.0.1:3000")).run(app).await
