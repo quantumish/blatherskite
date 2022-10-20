@@ -4,6 +4,9 @@
 >    - a person who talks at great length without making much sense.
 >    - foolish talk; nonsense.
 
+# About
+`blatherskite` is a drop-in chat backend for your messaging app. 
+
 # Dependencies
 You'll need to install CassandraDB for this: you can do that by running:
 ```
@@ -26,8 +29,26 @@ cargo run -p chatterbox &
 cargo run -p scuttlebutt &
 ```
 
+## Features
+Beyond basic text messaging, `blatherskite` has support for: 
+- Discord-esque servers
+- Threads
+- Direct messages
+- Basic permissioning (owner/admin/none)
+
+### Terminology
+Here's a quick guide to to the terms used by the service (that you might see in the `scuttlebutt` documentation):
+
+- Users can create or be invited to *groups* which contain *channels*.
+- Groups have:
+  - *members*, the users who are part of the group
+  - an *owner*, who made the group and is permitted to do specific actions (like deleting it)
+  - *admin*, users who have elevated permissions for a group (like adding/removing channels)
+- *DMs* are a special kind of group that are made between users directly and limit certain functionality. DMs only have one channel and have no admin.
+- Channels also have *members* (which can be a subset of the group!). Channels by default are *public*, which means when a user is invited to a group they will be added to the channel. You can set them to *private* with another API call.
+
 ## Scuttlebutt
-Scuttlebutt is an HTTP service that handles the creation, deletion, and updating of groups/channels/users as well as misc others.
+Scuttlebutt is an HTTP service that handles the creation, deletion, and updating of groups/channels/users as well as misc other actions.
 
 The various methods and objects are documented at `localhost:3000`, and the basic usage flow is something like:
 - `POST /api/user` to make a user, which will return a User object (see Schemas on the docs)
@@ -36,7 +57,7 @@ The various methods and objects are documented at `localhost:3000`, and the basi
 
 ## Chatterbox
 Chatterbox is a websocket service used for sending and receiving messages. To use:
-- Connect to the websocket at `ws://localhost:3001/ws/whee`
+- Connect to the websocket at `ws://localhost:3001/`
 - Send authentication in the form of `{"hash": "YOUR_PASSWORD_HASH", "id": "YOUR_ID"}`
 - Then use the websocket as normal!
   - Send message requests in the form of `{"content": "whee", "channel": "CHANNEL_ID"}`

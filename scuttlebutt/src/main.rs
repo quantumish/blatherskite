@@ -318,7 +318,7 @@ impl Api {
     #[oai(path = "/group", method = "delete")]
     /// Delete a group. 
     /// 
-    /// Only auhorized for the owner of a group.
+    /// Only authorized for the owner of a group.
     async fn delete_group(&self, auth: Authorization, id: Query<i64>) -> DeleteResponse {
         use DeleteResponse::*;
         if !self.db.valid_id(IdType::Group, id.0).unwrap() {
@@ -430,7 +430,7 @@ impl Api {
         } else if self.db.get_group_owner(gid.0).unwrap() != auth.0.id {
             return Unauthorized;
         }
-        self.db.add_group_admin(gid.0, uid.0).unwrap();        
+        self.db.add_group_admin(gid.0, uid.0).unwrap();  
         Success
     }
 
