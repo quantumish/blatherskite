@@ -13,6 +13,10 @@ You'll need to install CassandraDB for this: you can do that by running:
 brew install cassandra
 ```
 
+> **Warning**
+> This is a little wonky on M1 Macs: you'll need to follow the advice of [this page](https://stackoverflow.com/questions/69486339/nativelibrarydarwin-java64-failed-to-link-the-c-library-against-jna-native-m) when you face the inevitable JNA link error. Download for more recent JNA version is [here](https://search.maven.org/artifact/net.java.dev.jna/jna/5.8.0/jar). I personally ran `sudo mv jna-5.8.0.jar /opt/homebrew/Cellar/cassandra/4.0.6/libexec/jna-5.6.0.jar` (I think...) once I downloaded the new version, and that fixed it.
+
+
 You also need to install the Rust language: 
 ```
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
