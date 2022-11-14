@@ -11,6 +11,7 @@
 You'll need to install CassandraDB for this: you can do that by running:
 ```
 brew install cassandra
+brew install cassandra-cpp-driver
 ```
 
 > **Warning**
