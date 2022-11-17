@@ -106,7 +106,7 @@ pub fn check_name(name: String) -> String{
             };
                 index += 1;
         };
-    assert(fixed_name != "", "name is empty or contains only illegal characters");
+    assert!(fixed_name != "", "name is empty or contains only illegal characters");
     return fixed_name;
 }
 
