@@ -88,6 +88,17 @@ pub fn gen_id() -> i64 {
         .generate()
 }
 
+pub fn check_name(name: String) -> String{
+    let name_chars = name.chars();
+    let fixed_name_chars = name_chars.filter(|i| !i.is_whitespace());
+    let mut fixed_name: String = "".to_string();
+    for i in fixed_name_chars{
+        fixed_name.push(i);
+    };
+    assert!(fixed_name != "".to_string(), "name is empty or contains only illegal characters");
+    return fixed_name;
+}
+
 #[OpenApi]
 #[allow(unused_variables)]
 impl Api {
@@ -153,8 +164,9 @@ impl Api {
         if hash.0.len() != 64 {
             return BadRequest(PlainText("Invalid hash provided.".to_string()));
         }
+        let checked_name = check_name(name.0.clone());
         let id = gen_id();
-        self.db.create_user(id, name.0.clone(), email.0.clone(), hash.0).unwrap();
+        self.db.create_user(id, checked_name.clone(), email.0.clone(), hash.0).unwrap();
         self.db.create_user_groups(id).unwrap();
         self.db.create_user_dms(id).unwrap();
         Success(Json(User {
@@ -168,7 +180,8 @@ impl Api {
     /// Update your name and email.
     async fn update_user(&self, auth: Authorization, name: Query<String>, email: Query<String>) -> GenericResponse {
         use GenericResponse::*;
-        self.db.update_user(auth.0.id, name.0, email.0).unwrap();
+        let checked_name = check_name(name.0.clone());
+        self.db.update_user(auth.0.id, checked_name, email.0).unwrap();
         Success
     }
 
@@ -249,7 +262,8 @@ impl Api {
         if name.0 == "" {
             return BadRequest(PlainText("Empty string not allowed for name".to_string()))
         }
-        self.db.create_group(gid, auth.0.id, name.0.clone(), false).unwrap();
+        let fixed_name = check_name(name.0.clone());
+        self.db.create_group(gid, auth.0.id, fixed_name.clone(), false).unwrap();
         self.db.add_user_group(auth.0.id, gid).unwrap();
         self.db.add_group_admin(gid, auth.0.id).unwrap();
         let cid = gen_id();
@@ -310,8 +324,9 @@ impl Api {
             return NotFound(PlainText("Didn't find group or experienced database error.".to_string()));
         } else if self.db.get_group_owner(id.0).unwrap() != auth.0.id {
             return Unauthorized;
-        }        
-        self.db.update_group(id.0, name.0).unwrap();
+        }       
+        let fixed_name = check_name(name.0.clone()); 
+        self.db.update_group(id.0, fixed_name).unwrap();
         Success
     }
 
@@ -480,7 +495,8 @@ impl Api {
             return Unauthorized;
         }
         let cid = gen_id();
-        self.db.create_channel(cid, gid.0, auth.0.id, name.0.clone()).unwrap();
+        let fixed_name = check_name(name.0.clone());
+        self.db.create_channel(cid, gid.0, auth.0.id, fixed_name.clone()).unwrap();
         self.db.add_group_channel(gid.0, cid).unwrap();
         Success(Json(Channel {
             id: cid,
@@ -504,7 +520,8 @@ impl Api {
         if !self.db.get_group_admin(channel.group).unwrap().contains(&auth.0.id) {
             return Unauthorized;
         }
-        self.db.update_channel(id.0, name.0).unwrap();
+        let fixed_name = check_name(name.0.clone());
+        self.db.update_channel(id.0, fixed_name).unwrap();
         Success
     }
     
@@ -642,10 +659,11 @@ impl Api {
         } else if !self.db.valid_id(IdType::Message, id.0).unwrap() {
             return NotFound(PlainText("Message not found".to_string()))
         }
+        let fixed_name = check_name(name.0.clone());
         let tid = gen_id();
         let msg = self.db.get_message(id.0).unwrap();
         let chan = self.db.get_channel(msg.channel).unwrap();
-        self.db.create_channel(tid, chan.group, auth.0.id, name.0.clone()).unwrap();
+        self.db.create_channel(tid, chan.group, auth.0.id, fixed_name.clone()).unwrap();
         self.db.set_channel_private(tid, true).unwrap();
         self.db.set_thread(id.0, tid).unwrap();
         Success(Json(Channel {
