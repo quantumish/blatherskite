@@ -95,7 +95,6 @@ pub fn check_name(name: String) -> String{
     for i in fixed_name_chars{
         fixed_name.push(i);
     };
-    println!("{}", fixed_name);
     assert!(fixed_name != "".to_string(), "name is empty or contains only illegal characters");
     return fixed_name;
 }
