@@ -1,4 +1,3 @@
-use anyhow::Ok;
 use chrono::{DateTime, Duration, Local, Utc};
 use hmac::{Hmac, digest::typenum::array};
 use jwt::{SignWithKey, VerifyWithKey};
@@ -90,23 +89,14 @@ pub fn gen_id() -> i64 {
 }
 
 pub fn check_name(name: String) -> String{
-    let disallowed_chars: [u32; 53] = [0x202e,0x0009,0x00AD,0x034F,0x061C,0x115F,0x1160,0x17B4,0x17B5,0x180E,0x2000,0x2001,0x2002,0x2003,0x2004,0x2005,0x2006,0x2007,0x2008,0x2009,0x200A,0x200B,0x200C,0x200D,0x200E,0x200F,0x202F,0x205F,0x2060,0x2061,0x2062,0x2063,0x2064,0x206A,0x206B,0x206C,0x206D,0x206E,0x206F,0x3000,0x2800,0x3164,0xFEFF,0xFFA0,0x1D159,0x1D173,0x1D174,0x1D175,0x1D176,0x1D177,0x1D178,0x1D179,0x1D17A];
-        let name_chars = name.chars();
-        let mut fixed_name = String::from("");
-        let mut index = 0;
-        let mut to_keep:[bool; 32] = [true; 32]; //assuming 32 is the max name size - TODO: figure out how to not hardcode this in rust
-        for i in name_chars{
-            for j in 0..disallowed_chars.len(){
-                if i == char::from_u32(disallowed_chars[j]).unwrap() {
-                    to_keep[index] = false;
-                }; 
-            };
-            if to_keep[index]{
-                fixed_name.push(i)
-            };
-                index += 1;
-        };
-    assert!(fixed_name != "", "name is empty or contains only illegal characters");
+    let name_chars = name.chars();
+    let fixed_name_chars = name_chars.filter(|i| !i.is_whitespace());
+    let mut fixed_name: String = "".to_string();
+    for i in fixed_name_chars{
+        fixed_name.push(i);
+    };
+    println!("{}", fixed_name);
+    assert!(fixed_name != "".to_string(), "name is empty or contains only illegal characters");
     return fixed_name;
 }
 
@@ -175,8 +165,9 @@ impl Api {
         if hash.0.len() != 64 {
             return BadRequest(PlainText("Invalid hash provided.".to_string()));
         }
+        let checked_name = check_name(name.0.clone());
         let id = gen_id();
-        self.db.create_user(id, name.0.clone(), email.0.clone(), hash.0).unwrap();
+        self.db.create_user(id, checked_name.clone(), email.0.clone(), hash.0).unwrap();
         self.db.create_user_groups(id).unwrap();
         self.db.create_user_dms(id).unwrap();
         Success(Json(User {
@@ -190,7 +181,8 @@ impl Api {
     /// Update your name and email.
     async fn update_user(&self, auth: Authorization, name: Query<String>, email: Query<String>) -> GenericResponse {
         use GenericResponse::*;
-        self.db.update_user(auth.0.id, name.0, email.0).unwrap();
+        let checked_name = check_name(name.0.clone());
+        self.db.update_user(auth.0.id, checked_name, email.0).unwrap();
         Success
     }
 
@@ -271,7 +263,8 @@ impl Api {
         if name.0 == "" {
             return BadRequest(PlainText("Empty string not allowed for name".to_string()))
         }
-        self.db.create_group(gid, auth.0.id, name.0.clone(), false).unwrap();
+        let fixed_name = check_name(name.0.clone());
+        self.db.create_group(gid, auth.0.id, fixed_name.clone(), false).unwrap();
         self.db.add_user_group(auth.0.id, gid).unwrap();
         self.db.add_group_admin(gid, auth.0.id).unwrap();
         let cid = gen_id();
@@ -332,8 +325,9 @@ impl Api {
             return NotFound(PlainText("Didn't find group or experienced database error.".to_string()));
         } else if self.db.get_group_owner(id.0).unwrap() != auth.0.id {
             return Unauthorized;
-        }        
-        self.db.update_group(id.0, name.0).unwrap();
+        }       
+        let fixed_name = check_name(name.0.clone()); 
+        self.db.update_group(id.0, fixed_name).unwrap();
         Success
     }
 
@@ -502,7 +496,8 @@ impl Api {
             return Unauthorized;
         }
         let cid = gen_id();
-        self.db.create_channel(cid, gid.0, auth.0.id, name.0.clone()).unwrap();
+        let fixed_name = check_name(name.0.clone());
+        self.db.create_channel(cid, gid.0, auth.0.id, fixed_name.clone()).unwrap();
         self.db.add_group_channel(gid.0, cid).unwrap();
         Success(Json(Channel {
             id: cid,
@@ -526,7 +521,8 @@ impl Api {
         if !self.db.get_group_admin(channel.group).unwrap().contains(&auth.0.id) {
             return Unauthorized;
         }
-        self.db.update_channel(id.0, name.0).unwrap();
+        let fixed_name = check_name(name.0.clone());
+        self.db.update_channel(id.0, fixed_name).unwrap();
         Success
     }
     
@@ -664,10 +660,11 @@ impl Api {
         } else if !self.db.valid_id(IdType::Message, id.0).unwrap() {
             return NotFound(PlainText("Message not found".to_string()))
         }
+        let fixed_name = check_name(name.0.clone());
         let tid = gen_id();
         let msg = self.db.get_message(id.0).unwrap();
         let chan = self.db.get_channel(msg.channel).unwrap();
-        self.db.create_channel(tid, chan.group, auth.0.id, name.0.clone()).unwrap();
+        self.db.create_channel(tid, chan.group, auth.0.id, fixed_name.clone()).unwrap();
         self.db.set_channel_private(tid, true).unwrap();
         self.db.set_thread(id.0, tid).unwrap();
         Success(Json(Channel {
