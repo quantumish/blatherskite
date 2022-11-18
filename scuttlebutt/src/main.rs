@@ -1,5 +1,5 @@
 use chrono::{DateTime, Duration, Local, Utc};
-use hmac::{Hmac, digest::typenum::array};
+use hmac::Hmac;
 use jwt::{SignWithKey, VerifyWithKey};
 use poem::{
     listener::TcpListener, web::Data, EndpointExt, Request, Result,
