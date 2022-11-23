@@ -483,9 +483,8 @@ impl Api {
     /// Create a channel in a group.
     ///
     /// Only authorized for a group admin.
-    /// Defaults to a public channel with no members but yourself.
-    // TODO add some mechanism for auto-inviting current members
-    async fn make_channel(&self, auth: Authorization, gid: Query<i64>, name: Query<String>) -> CreateChannelResponse {
+    /// Takes in privacy bool, will be a empty private channel if true, will invite every user in the group if false
+    async fn make_channel(&self, auth: Authorization, gid: Query<i64>, name: Query<String>, private: bool) -> CreateChannelResponse {
         use CreateChannelResponse::*;
         if name.0 == "" {
             return BadRequest(PlainText("Empty string not allowed for name".to_string()))
@@ -498,12 +497,21 @@ impl Api {
         let fixed_name = check_name(name.0.clone());
         self.db.create_channel(cid, gid.0, auth.0.id, fixed_name.clone()).unwrap();
         self.db.add_group_channel(gid.0, cid).unwrap();
+        channel = db.get_channel(cid).unwrap();
+        if private { // making the channel private
+            make_channel_private(channel)
+        }
+        else // adding existing users to channel
+            let users = self.db.get_group_users(gid.0).unwrap();
+            for user in users {
+                self.db.add_channel_member(channel, user).unwrap();
+        }
         Success(Json(Channel {
             id: cid,
             group: gid.0,
             name: name.0,
-            members: vec![auth.0.id],
-            private: false
+            members: users,
+            private: private
         }))
     }
 
