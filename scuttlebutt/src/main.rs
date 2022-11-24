@@ -497,15 +497,16 @@ impl Api {
         let fixed_name = check_name(name.0.clone());
         self.db.create_channel(cid, gid.0, auth.0.id, fixed_name.clone()).unwrap();
         self.db.add_group_channel(gid.0, cid).unwrap();
-        channel = db.get_channel(cid).unwrap();
+        let channel = db.get_channel(cid).unwrap();
         if private { // making the channel private
-            make_channel_private(channel)
+            make_channel_private(channel);
         }
-        else // adding existing users to channel
+        else{ // adding existing users to channel
             let users = self.db.get_group_users(gid.0).unwrap();
             for user in users {
                 self.db.add_channel_member(channel, user).unwrap();
-        }
+            }
+        }   
         Success(Json(Channel {
             id: cid,
             group: gid.0,

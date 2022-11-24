@@ -88,8 +88,8 @@ async fn find_groups(cli: &FakeClient) -> Vec<Group> {
     resp.json().await.value().deserialize::<Vec<Group>>()
 }
 
-async fn make_channel(cli: &FakeClient, gid: i64, name: &str) -> Channel {
-    let resp = cli.post(format!("/api/group/channels?gid={}&name={}", gid, name)).send().await;
+async fn make_channel(cli: &FakeClient, gid: i64, name: &str, private:bool) -> Channel {
+    let resp = cli.post(format!("/api/group/channels?gid={}&name={}", gid, name, private)).send().await;
     resp.assert_status_is_ok();
     resp.json().await.value().deserialize::<Channel>()
 }
@@ -372,7 +372,7 @@ fn test_id_gen() {
 async fn get_channel() {
     let (cli, _user) = setup_user_auth().await;
     let group = make_group(&cli, "test").await;
-    let chan = make_channel(&cli, group.id, "random").await;
+    let chan = make_channel(&cli, group.id, "random", true).await;
     let resp = cli.get(format!("/api/channel?id={}", chan.id)).send().await;
     resp.assert_status_is_ok();
     let recv_chan = resp.json().await.value().deserialize::<Channel>();
@@ -384,7 +384,7 @@ async fn get_channel() {
 async fn post_channel_whitebox() {
     let (cli, _user) = setup_user_auth().await;
     let group = make_group(&cli, "test").await;
-    let chan = make_channel(&cli, group.id, "random").await;
+    let chan = make_channel(&cli, group.id, "random", true).await;
     
     let db = Cassandra::new("test");
     assert_eq!(db.get_channel(chan.id).unwrap(), chan);
@@ -397,9 +397,9 @@ async fn post_channel_whitebox() {
 async fn get_channels() {
     let (cli, _user) = setup_user_auth().await;
     let group = make_group(&cli, "test").await;
-    let chan1 = make_channel(&cli, group.id, "random").await;
-    let chan2 = make_channel(&cli, group.id, "random").await;
-    let chan3 = make_channel(&cli, group.id, "random").await;
+    let chan1 = make_channel(&cli, group.id, "random", true).await; // are private here
+    let chan2 = make_channel(&cli, group.id, "random", true).await;
+    let chan3 = make_channel(&cli, group.id, "random", true).await;
     let resp = cli.get(format!("/api/group/channels?gid={}", group.id)).send().await;
     resp.assert_status_is_ok();
     let channels = resp.json().await.value().deserialize::<Vec<Channel>>();
