@@ -4,6 +4,8 @@ use poem_openapi::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::models;
+
 #[derive(Object, Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
 /// Object representing a user
 pub struct User {
@@ -33,7 +35,7 @@ pub struct Group {
 #[derive(Object, Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
 /// Object representing a group's channel.
 /// No guarantees are made for the order of any vector in this struct.
-pub struct Channel {
+pub struct ChannelOrig {
     pub id: i64,
     pub name: String,
 	// ID of the group the channel is in
@@ -154,7 +156,7 @@ pub enum CreateGroupResponse {
 pub enum ChannelResponse {
     /// Returns the channel requested
     #[oai(status = 200)]
-    Success(Json<Channel>),
+    Success(Json<ChannelOrig>),
 	/// Invalid ID or user is not a member of specified channel.
     #[oai(status = 404)]
     NotFound,
@@ -163,11 +165,26 @@ pub enum ChannelResponse {
     InternalError(PlainText<String>),
 }
 
+
+#[derive(ApiResponse)]
+pub enum ChannelResponse2 {
+    /// Returns the channel requested
+    #[oai(status = 200)]
+    Success(Json<models::Channel>),
+	/// Invalid ID or user is not a member of specified channel.
+    #[oai(status = 404)]
+    NotFound,
+    /// Internal server error: likely due to a database operation failing
+    #[oai(status = 500)]
+    InternalError(PlainText<String>),
+}
+
+
 #[derive(ApiResponse)]
 pub enum CreateChannelResponse {
     /// Returns the channel requested
     #[oai(status = 200)]
-    Success(Json<Channel>),
+    Success(Json<ChannelOrig>),
 	/// You are not authorized to perform the action
     #[oai(status = 401)]
     Unauthorized,
@@ -240,7 +257,7 @@ pub enum GroupsResponse {
 pub enum ChannelsResponse {
     /// Returns the channels in a group
     #[oai(status = 200)]
-    Success(Json<Vec<Channel>>),
+    Success(Json<Vec<ChannelOrig>>),
     /// Invalid group ID
     #[oai(status = 404)]
     NotFound,

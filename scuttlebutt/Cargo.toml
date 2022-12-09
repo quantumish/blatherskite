@@ -11,7 +11,7 @@ base64 = "0.13.0"
 cassandra-cpp = "1.1.0"
 chrono = { version = "0.4.22", features = ["serde"] }
 ctor = "0.1.23"
-error-stack = "0.2.3"
+# error-stack = "0.1"
 hex = "0.4.3"
 hmac = "0.12.1"
 jwt = "0.16.0"
@@ -28,3 +28,6 @@ sha2 = "0.10.6"
 thiserror = "1.0.37"
 tokio = { version = "1", features = ["full"] }
 tracing-subscriber = "0.3.15"
+diesel = { version = "2.0.0", features = ["postgres"] }
+dotenvy = "0.15.6"
+html-escape = "0.2.12"
